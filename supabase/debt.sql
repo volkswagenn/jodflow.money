@@ -607,7 +607,74 @@ select 'คอลัมน์ transactions.debt_entry_id',
                           where table_name = 'transactions' and column_name = 'debt_entry_id')
             then '✅' else '❌' end
 union all
-select 'ฟังก์ชัน RPC ของหนี้สิน', count(*)::text || ' / 5'
+select 'ฟังก์ชัน RPC ของหนี้สิน', count(*)::text || ' / 6'
   from information_schema.routines
  where routine_schema = 'public'
-   and routine_name in ('create_debt', 'pay_debt_entry', 'undo_debt_entry', 'settle_debt', 'cancel_debt');
+   and routine_name in ('create_debt', 'pay_debt_entry', 'undo_debt_entry', 'settle_debt', 'cancel_debt', 'edit_debt_payment');
+
+
+
+-- ── แก้ไขการจ่ายงวดหนี้ในที่ (วิธี/บัญชี/ยอด/วันที่) ───────────────────────────
+-- คืนของเดิมเข้ากระเป๋าเดิม ตัดของใหม่จากกระเป๋าใหม่ แล้วแก้งวดกับรายการที่ผูกไว้
+-- id คงเดิม สลิปและประวัติไม่หลุด ล้มตรงไหนย้อนทั้งก้อน
+create or replace function public.edit_debt_payment(
+  p_entry   uuid,
+  p_method  text,
+  p_account uuid,
+  p_amount  numeric,
+  p_date    date,
+  p_log     jsonb default null
+) returns debt_entries language plpgsql security definer set search_path = public as $$
+declare
+  v_entry debt_entries;
+  v_debt  debts;
+  v_sign  numeric;
+  v_old   text;
+  v_new   text;
+begin
+  select * into v_entry from debt_entries where id = p_entry;
+  if not found then raise exception 'ไม่พบงวดนี้'; end if;
+  perform assert_can_edit(v_entry.shop_id);
+  if v_entry.status <> 'paid' then raise exception 'งวดนี้ยังไม่ได้จ่าย'; end if;
+  if v_entry.paid_method is null then raise exception 'งวดนี้ไม่ได้บันทึกว่าจ่ายจากกระเป๋าไหน แก้ไขไม่ได้'; end if;
+  if p_amount is null or p_amount <= 0 then raise exception 'จำนวนเงินต้องมากกว่าศูนย์'; end if;
+  if p_method not in ('cash', 'transfer') then raise exception 'วิธีจ่ายไม่ถูกต้อง: %', p_method; end if;
+  if p_method = 'transfer' and p_account is null then raise exception 'ต้องเลือกบัญชี'; end if;
+  if p_date is null then raise exception 'ต้องระบุวันที่จ่าย'; end if;
+
+  select * into v_debt from debts where id = v_entry.debt_id;
+  -- เราติดคนอื่น = เงินออก (-) · คนอื่นติดเรา = เงินเข้า (+) — คืนกับตัดจึงกลับด้านกัน
+  v_sign := case when v_debt.direction = 'receivable' then 1 else -1 end;
+
+  v_old := case when v_entry.paid_method = 'transfer' and v_entry.transfer_account_id is not null
+                 and exists (select 1 from transfer_accounts where id = v_entry.transfer_account_id)
+                then 'transfer:' || v_entry.transfer_account_id else 'cash' end;
+  v_new := case when p_method = 'cash' then 'cash' else 'transfer:' || p_account end;
+  perform apply_wallet_effect(v_entry.shop_id, v_old, -v_sign * v_entry.amount);
+  perform apply_wallet_effect(v_entry.shop_id, v_new,  v_sign * p_amount);
+
+  if v_entry.transaction_id is not null then
+    update transactions
+       set date = p_date, amount = p_amount, method = p_method,
+           transfer_account_id = case when p_method = 'transfer' then p_account end
+     where id = v_entry.transaction_id;
+  end if;
+
+  update debt_entries
+     set amount = p_amount, paid_at = (p_date::timestamp at time zone 'Asia/Bangkok'),
+         paid_method = p_method,
+         transfer_account_id = case when p_method = 'transfer' then p_account end
+   where id = p_entry
+   returning * into v_entry;
+
+  perform write_log(v_entry.shop_id, p_log);
+  return v_entry;
+end;
+$$;
+
+notify pgrst, 'reload schema';
+
+select 'แก้ไขการจ่ายงวดหนี้ในที่' as "รายการ",
+       case when exists (select 1 from information_schema.routines
+                          where routine_schema = 'public' and routine_name = 'edit_debt_payment')
+            then '✅' else '❌ ยังไม่มี — รันไฟล์นี้ซ้ำอีกรอบ' end as "ผล";

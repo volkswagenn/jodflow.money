@@ -141,3 +141,11 @@ export async function undoRecurringEntry(id, log = null) {
   const row = await unwrap(supabase.rpc('undo_recurring_entry', { p_entry: id, p_log: log }))
   return fromRow('recurring_entries', row)
 }
+
+/** แก้ไขการจ่ายรอบเดือนในที่ — คืนเงินเดิม (สด/โอน/บัตร) ตัดเงินใหม่ แก้รอบและรายจ่ายที่ผูก */
+export async function editRecurringPayment(id, { method, accountId = null, amount, paidAt, log = null }) {
+  const row = await unwrap(supabase.rpc('edit_recurring_payment', {
+    p_entry: id, p_method: method, p_account: accountId, p_amount: amount, p_paid_at: paidAt, p_log: log,
+  }))
+  return fromRow('recurring_entries', row)
+}

@@ -322,7 +322,59 @@ begin
 end;
 $$;
 
--- ── ตรวจว่าฟังก์ชันครบ (ควรได้ 8 แถว) ───────────────────────────────────────
+-- ── แก้ไขการจ่ายรายการค้างชำระในที่ (วิธี/บัญชี/วันที่ — ยอดคือยอดของรายการ) ──
+-- คืนของเดิมเข้ากระเป๋าเดิม ตัดจากกระเป๋าใหม่ แล้วแก้รายการ รายจ่ายที่ผูก และรอบประจำที่ผูก
+create or replace function public.edit_pending_payment(
+  p_pending uuid,
+  p_method  text,
+  p_account uuid,
+  p_paid_at timestamptz,
+  p_log     jsonb default null
+) returns pending_payments language plpgsql security definer set search_path = public as $$
+declare v_p pending_payments; v_old text; v_new text;
+begin
+  select * into v_p from pending_payments where id = p_pending;
+  if v_p.id is null then raise exception 'ไม่พบรายการค้างชำระนี้'; end if;
+  perform assert_can_edit(v_p.shop_id);
+  if v_p.status <> 'paid' then raise exception 'รายการนี้ยังไม่ได้จ่าย'; end if;
+  if v_p.paid_method is null then raise exception 'รายการนี้ไม่ได้บันทึกว่าจ่ายจากกระเป๋าไหน แก้ไขไม่ได้'; end if;
+  if p_method not in ('cash', 'transfer') then raise exception 'วิธีจ่ายไม่ถูกต้อง: %', p_method; end if;
+  if p_method = 'transfer' and p_account is null then raise exception 'ต้องเลือกบัญชีเงินโอน'; end if;
+  if p_paid_at is null then raise exception 'ต้องระบุวันที่จ่าย'; end if;
+
+  v_old := case when v_p.paid_method = 'transfer' and v_p.transfer_account_id is not null
+                 and exists (select 1 from transfer_accounts where id = v_p.transfer_account_id)
+                then 'transfer:' || v_p.transfer_account_id else 'cash' end;
+  v_new := case when p_method = 'cash' then 'cash' else 'transfer:' || p_account end;
+  perform apply_wallet_effect(v_p.shop_id, v_old,  v_p.amount);
+  perform apply_wallet_effect(v_p.shop_id, v_new, -v_p.amount);
+
+  if v_p.transaction_id is not null then
+    update transactions
+       set date = (p_paid_at at time zone 'Asia/Bangkok')::date, method = p_method,
+           transfer_account_id = case when p_method = 'transfer' then p_account end
+     where id = v_p.transaction_id;
+  end if;
+
+  update pending_payments
+     set paid_at = p_paid_at, paid_method = p_method,
+         transfer_account_id = case when p_method = 'transfer' then p_account end
+   where id = p_pending
+   returning * into v_p;
+
+  if v_p.recurring_entry_id is not null then
+    update recurring_entries
+       set paid_at = p_paid_at, paid_method = p_method,
+           transfer_account_id = case when p_method = 'transfer' then p_account end
+     where id = v_p.recurring_entry_id;
+  end if;
+
+  perform write_log(v_p.shop_id, p_log);
+  return v_p;
+end;
+$$;
+
+-- ── ตรวจว่าฟังก์ชันครบ (ควรได้ 9 แถว) ───────────────────────────────────────
 
 select routine_name
   from information_schema.routines
@@ -330,6 +382,6 @@ select routine_name
    and routine_name in (
      'move_cash_transfer', 'move_sub_wallet', 'move_between_sub_wallets',
      'borrow_from_sub_wallet', 'return_loan',
-     'pay_pending_payment', 'receive_pending_income', 'undo_pending_payment'
+     'pay_pending_payment', 'receive_pending_income', 'undo_pending_payment', 'edit_pending_payment'
    )
  order by routine_name;

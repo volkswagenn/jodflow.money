@@ -83,6 +83,14 @@ export async function undoDebtEntry(entryId, log = null) {
   return fromRow('debt_entries', row)
 }
 
+/** แก้ไขการจ่ายงวดหนี้ในที่ — คืนเงินเดิม ตัดเงินใหม่ แก้งวดและรายการที่ผูก ในคำสั่งเดียว */
+export async function editDebtPayment(entryId, { method, accountId = null, amount, date, log = null }) {
+  const row = await unwrap(supabase.rpc('edit_debt_payment', {
+    p_entry: entryId, p_method: method, p_account: accountId, p_amount: amount, p_date: date, p_log: log,
+  }))
+  return fromRow('debt_entries', row)
+}
+
 export async function settleDebt(debtId, { method, accountId = null, date, fee = 0, log = null }) {
   const row = await unwrap(supabase.rpc('settle_debt', {
     p_debt: debtId, p_method: method, p_account: accountId,

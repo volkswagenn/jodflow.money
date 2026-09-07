@@ -194,6 +194,20 @@ const useCreditCardStore = create((set, get) => ({
     return statement
   },
 
+  /** แก้ไขขาการจ่ายในที่ — วิธี/บัญชี/ยอด/วันที่ (หน้าประวัติการจ่าย) */
+  editPaymentLeg: async (legId, params) => {
+    const leg = await stmtApi.editPaymentLeg(legId, params)
+    await get().refresh()
+    return leg
+  },
+
+  /** บิลเก่าที่ไม่มีขาการจ่าย — แก้กระเป๋า/วันที่ของยอดที่จ่ายทั้งใบ */
+  editStatementPayment: async (statementId, params) => {
+    const statement = await stmtApi.editStatementPayment(statementId, params)
+    await get().refresh()
+    return statement
+  },
+
   // ทำเครื่องหมายว่ารายการในบิลจ่ายไปแล้ว — ไม่ตัดเงินซ้ำ แค่ผูกขาที่จ่ายไว้แล้ว
   // เข้ากับรายการ ใช้กับของที่จ่ายไปก่อนระบบจะจำได้ว่าเงินก้อนไหนของบรรทัดไหน
   assignStatementPayment: async (transactionId, log) => {
@@ -239,6 +253,13 @@ const useCreditCardStore = create((set, get) => ({
   /** ย้อนการจ่ายค่างวด */
   undoEntry: async (entryId, log) => {
     const entry = await instApi.undoInstallmentEntry(entryId, log)
+    await get().refresh()
+    return entry
+  },
+
+  /** แก้ไขการจ่ายค่างวดในที่ — วิธี/บัญชี/ยอด/วันเวลา */
+  editEntryPayment: async (entryId, params) => {
+    const entry = await instApi.editInstallmentPayment(entryId, params)
     await get().refresh()
     return entry
   },

@@ -137,3 +137,81 @@ select 'ย้อนการจ่ายรอบเดือนจากหน
        case when exists (select 1 from information_schema.routines
                           where routine_schema = 'public' and routine_name = 'undo_recurring_entry')
             then '✅' else '❌ ยังไม่มี — รันไฟล์นี้ซ้ำอีกรอบ' end as "ผล";
+
+
+
+-- ── แก้ไขการจ่ายรอบเดือนในที่ (วิธี/บัญชี/ยอด/วันที่) ────────────────────────
+-- เงินเดิมอ่านจากรายจ่ายที่ผูกอยู่ (สด/โอน/บัตร) คืนเข้าที่เดิม แล้วตัดของใหม่
+-- รอบที่จ่ายผ่านรายการค้างชำระต้องแก้ที่รายการค้างชำระ (เงินและรายจ่ายอยู่ที่นั่น)
+create or replace function public.edit_recurring_payment(
+  p_entry   uuid,
+  p_method  text,
+  p_account uuid,
+  p_amount  numeric,
+  p_paid_at timestamptz,
+  p_log     jsonb default null
+) returns recurring_entries language plpgsql security definer set search_path = public as $$
+declare v_e recurring_entries; v_tx transactions; v_old text; v_new text;
+begin
+  select * into v_e from recurring_entries where id = p_entry;
+  if v_e.id is null then raise exception 'ไม่พบรอบเดือนนี้'; end if;
+  perform assert_can_edit(v_e.shop_id);
+  if v_e.status <> 'paid' then raise exception 'รอบนี้ยังไม่ได้จ่าย'; end if;
+  if v_e.pending_payment_id is not null then
+    raise exception 'รอบนี้ถูกจ่ายผ่านรายการค้างชำระ ให้แก้ที่ประวัติของรายการค้างชำระแทน';
+  end if;
+  if p_amount is null or p_amount <= 0 then raise exception 'จำนวนเงินต้องมากกว่าศูนย์'; end if;
+  if p_method not in ('cash', 'transfer') then raise exception 'วิธีจ่ายไม่ถูกต้อง: %', p_method; end if;
+  if p_method = 'transfer' and p_account is null then raise exception 'ต้องเลือกบัญชีเงินโอน'; end if;
+  if p_paid_at is null then raise exception 'ต้องระบุวันที่จ่าย'; end if;
+
+  if v_e.transaction_id is not null then
+    select * into v_tx from transactions where id = v_e.transaction_id;
+  end if;
+  if v_tx.id is not null then
+    v_old := case v_tx.method
+      when 'cash' then 'cash'
+      when 'transfer' then case
+        when v_tx.transfer_account_id is not null
+             and exists (select 1 from transfer_accounts where id = v_tx.transfer_account_id)
+          then 'transfer:' || v_tx.transfer_account_id else 'cash' end
+      when 'card' then case when v_tx.card_id is not null then 'card:' || v_tx.card_id else null end
+      else null end;
+    if v_old is not null then perform apply_wallet_effect(v_e.shop_id, v_old, v_tx.amount); end if;
+  elsif v_e.paid_method in ('cash', 'transfer') then
+    v_old := case when v_e.paid_method = 'transfer' and v_e.transfer_account_id is not null
+                   and exists (select 1 from transfer_accounts where id = v_e.transfer_account_id)
+                  then 'transfer:' || v_e.transfer_account_id else 'cash' end;
+    perform apply_wallet_effect(v_e.shop_id, v_old, v_e.amount);
+  else
+    raise exception 'รอบนี้ไม่ได้บันทึกว่าจ่ายจากกระเป๋าไหน แก้ไขไม่ได้';
+  end if;
+
+  v_new := case when p_method = 'cash' then 'cash' else 'transfer:' || p_account end;
+  perform apply_wallet_effect(v_e.shop_id, v_new, -p_amount);
+
+  if v_tx.id is not null then
+    update transactions
+       set date = (p_paid_at at time zone 'Asia/Bangkok')::date, amount = p_amount, method = p_method,
+           transfer_account_id = case when p_method = 'transfer' then p_account end,
+           card_id = null
+     where id = v_tx.id;
+  end if;
+
+  update recurring_entries
+     set amount = p_amount, paid_at = p_paid_at, paid_method = p_method,
+         transfer_account_id = case when p_method = 'transfer' then p_account end
+   where id = p_entry
+   returning * into v_e;
+
+  perform write_log(v_e.shop_id, p_log);
+  return v_e;
+end;
+$$;
+
+notify pgrst, 'reload schema';
+
+select 'แก้ไขการจ่ายรอบเดือนในที่' as "รายการ",
+       case when exists (select 1 from information_schema.routines
+                          where routine_schema = 'public' and routine_name = 'edit_recurring_payment')
+            then '✅' else '❌ ยังไม่มี — รันไฟล์นี้ซ้ำอีกรอบ' end as "ผล";

@@ -191,3 +191,11 @@ export async function undoInstallmentEntry(entryId, log = null) {
   const row = await unwrap(supabase.rpc('undo_installment_entry', { p_entry: entryId, p_log: log }))
   return fromRow('card_installment_entries', row)
 }
+
+/** แก้ไขการจ่ายค่างวดในที่ — คืนเงินเดิม ตัดเงินใหม่ แก้งวดและรายจ่ายที่ผูก ในคำสั่งเดียว */
+export async function editInstallmentPayment(entryId, { method, accountId = null, amount, paidAt, log = null }) {
+  const row = await unwrap(supabase.rpc('edit_installment_payment', {
+    p_entry: entryId, p_method: method, p_account: accountId, p_amount: amount, p_paid_at: paidAt, p_log: log,
+  }))
+  return fromRow('card_installment_entries', row)
+}

@@ -120,6 +120,13 @@ const usePendingStore = create((set, get) => ({
     return item
   },
 
+  /** แก้ไขการจ่ายในที่ — วิธี/บัญชี/วันเวลา (ยอดคือยอดของรายการ) */
+  editPendingPayment: async (id, params) => {
+    const item = await pendingApi.editPendingPayment(id, params)
+    set((s) => ({ pendingPayments: s.pendingPayments.map((p) => (p.id === id ? { ...p, ...item } : p)) }))
+    return item
+  },
+
   payPending: async (id, method, transactionId = null, transferAccountId = null) => {
     const item = await pendingApi.updatePendingPayment(id, {
       status: 'paid',

@@ -28,6 +28,8 @@ const useDebtStore = create((set, get) => ({
   },
   payEntry: async (id, params) => { const r = await api.payDebtEntry(id, params); await get().refresh(); return r },
   undoEntry: async (id, log) => { const r = await api.undoDebtEntry(id, log); await get().refresh(); return r },
+  /** แก้ไขการจ่ายงวดในที่ — วิธี/บัญชี/ยอด/วันที่ */
+  editEntryPayment: async (id, params) => { const r = await api.editDebtPayment(id, params); await get().refresh(); return r },
   settleDebt: async (id, params) => { const r = await api.settleDebt(id, params); await get().refresh(); return r },
   cancelDebt: async (id, log) => { const r = await api.cancelDebt(id, log); await get().refresh(); return r },
   /** แก้สัญญาทั้งฉบับ — งวดที่จ่ายไปแล้วไม่ถูกแตะ */

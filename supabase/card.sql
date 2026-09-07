@@ -1155,7 +1155,7 @@ select 'คอลัมน์ที่เติมเพิ่ม', count(*)::te
      or (table_name='recurring_entries' and column_name = 'card_id')
      or (table_name='shop_settings'     and column_name = 'card_min_rate'))
 union all
-select 'ฟังก์ชัน RPC ของบัตร', count(*)::text || ' / 19'
+select 'ฟังก์ชัน RPC ของบัตร', count(*)::text || ' / 22'
   from information_schema.routines
  where routine_schema = 'public'
    and routine_name in ('close_card_statement','pay_card_statement','undo_card_payment',
@@ -1164,7 +1164,7 @@ select 'ฟังก์ชัน RPC ของบัตร', count(*)::text || '
      'pay_installment_entry','undo_installment_entry','delete_card_installment','refund_source',
      'attach_installment_to_closed_statements',
      'attach_transaction_to_statement','detach_transaction_from_statement','apply_statement_delta',
-     'prepay_card_transaction','undo_card_prepayment', 'undo_card_payment_leg')
+     'prepay_card_transaction','undo_card_prepayment', 'undo_card_payment_leg', 'edit_card_payment_leg', 'edit_installment_payment', 'edit_card_statement_payment')
 union all
 select 'รับ method = card แล้ว',
        case when exists (
@@ -2357,3 +2357,197 @@ select 'ย้อนการจ่ายจากหน้าประวัต
        case when exists (select 1 from information_schema.routines
                           where routine_schema = 'public' and routine_name = 'undo_card_payment_leg')
             then '✅' else '❌ ยังไม่มี — รันไฟล์นี้ซ้ำอีกรอบ' end as "ผล";
+
+
+
+-- ###########################################################################
+-- ##  18. แก้ไขการจ่ายในที่ (ไม่ต้องย้อนแล้วจ่ายใหม่)
+-- ###########################################################################
+--
+-- แก้วิธีจ่าย/บัญชี/ยอด/วันที่ของการจ่ายที่บันทึกไปแล้ว ในคำสั่งเดียวที่จบในตัว:
+-- คืนเงินเข้ากระเป๋าเดิม ตัดจากกระเป๋าใหม่ ปรับยอดบิล/หนี้บัตรตามส่วนต่าง โดย id ของ
+-- การจ่ายคงเดิม — สลิป ติ๊ก "จ่ายให้รายการนี้" และประวัติจึงอยู่ครบ ไม่มีจังหวะที่
+-- รายการ "กลายเป็นยังไม่จ่าย" ให้ใครเห็น และถ้าล้มตรงไหนทั้งก้อนย้อนกลับเอง (transaction)
+-- (โปรแกรมบัญชีใหญ่ๆ บังคับให้ลบแล้วบันทึกใหม่ ซึ่งเป็นคำบ่นอันดับต้นๆ ของผู้ใช้
+--  ที่นี่จึงทำแบบแก้ในที่ แต่เก็บค่าก่อน/หลังไว้ใน log ให้ตรวจสอบย้อนหลังได้)
+
+-- ── ขาการจ่ายบิล (ทั้งขาที่อยู่ในใบ และขาที่จ่ายก่อนออกบิล) ─────────────────
+create or replace function public.edit_card_payment_leg(
+  p_leg     uuid,
+  p_method  text,
+  p_account uuid,
+  p_amount  numeric,
+  p_date    date,
+  p_log     jsonb default null
+) returns card_statement_payments language plpgsql security definer set search_path = public as $$
+declare
+  v_leg   card_statement_payments;
+  v_st    card_statements;
+  v_tx    transactions;
+  v_paid  numeric(14,2);
+  v_delta numeric(14,2);
+  v_new   text;
+begin
+  select * into v_leg from card_statement_payments where id = p_leg;
+  if not found then raise exception 'ไม่พบการจ่ายครั้งนี้ (อาจถูกย้อนไปแล้ว)'; end if;
+  perform assert_can_edit(v_leg.shop_id);
+  if p_amount is null or p_amount <= 0 then raise exception 'จำนวนเงินต้องมากกว่าศูนย์'; end if;
+  if p_method not in ('cash', 'transfer') then raise exception 'วิธีจ่ายไม่ถูกต้อง: %', p_method; end if;
+  if p_method = 'transfer' and p_account is null then raise exception 'ต้องเลือกบัญชีเงินโอน'; end if;
+  if p_date is null then raise exception 'ต้องระบุวันที่จ่าย'; end if;
+
+  v_delta := p_amount - v_leg.amount;
+
+  if v_leg.statement_id is not null then
+    select * into v_st from card_statements where id = v_leg.statement_id;
+    if v_st.carried_to is not null then
+      raise exception 'ใบนี้ถูกยกยอดไปรวมในบิลรอบถัดไปแล้ว แก้ไขการจ่ายไม่ได้ — แก้ที่บิลใบล่าสุดแทน';
+    end if;
+  else
+    -- ขาที่จ่ายก่อนออกบิล: ยอดใหม่รวมขาอื่นของรายการเดียวกันต้องไม่เกินยอดรายการ
+    select * into v_tx from transactions where id = v_leg.transaction_id;
+    if not found then raise exception 'รายการที่จ่ายให้ถูกลบไปแล้ว แก้ไขไม่ได้'; end if;
+    select coalesce(sum(amount), 0) into v_paid
+      from card_statement_payments
+     where transaction_id = v_leg.transaction_id and statement_id is null and id <> p_leg;
+    if v_paid + p_amount > v_tx.amount + 0.005 then
+      raise exception 'จ่ายเกินยอดของรายการ (รายการ % บาท ขาอื่นจ่ายแล้ว % บาท)', v_tx.amount, v_paid;
+    end if;
+  end if;
+
+  -- เงิน: คืนขาเดิมเต็มจำนวนเข้ากระเป๋าเดิม แล้วตัดยอดใหม่จากกระเป๋าใหม่
+  -- (กระเป๋าเดียวกันก็ทำสองขา ผลสุทธิคือส่วนต่าง — ง่ายกว่าแยกกรณี และถูกเสมอ)
+  perform apply_wallet_effect(v_leg.shop_id,
+    refund_source(v_leg.shop_id, v_leg.method, v_leg.transfer_account_id), v_leg.amount);
+  v_new := case when p_method = 'cash' then 'cash' else 'transfer:' || p_account end;
+  perform apply_wallet_effect(v_leg.shop_id, v_new, -p_amount);
+  -- หนี้บัตรขยับตามส่วนต่างของยอดที่จ่าย
+  if v_delta <> 0 then
+    perform apply_wallet_effect(v_leg.shop_id, 'card:' || v_leg.card_id, v_delta);
+  end if;
+
+  update card_statement_payments
+     set method = p_method,
+         transfer_account_id = case when p_method = 'transfer' then p_account end,
+         amount = p_amount,
+         paid_at = p_date
+   where id = p_leg
+   returning * into v_leg;
+
+  if v_st.id is not null then
+    update card_statements
+       set paid_amount = paid_amount + v_delta,
+           status = case when amount <= 0 then 'paid'
+                         when paid_amount + v_delta >= amount then 'paid'
+                         when paid_amount + v_delta > 0 then 'partial' else 'closed' end,
+           paid_at = p_date,
+           paid_method = p_method,
+           transfer_account_id = case when p_method = 'transfer' then p_account end
+     where id = v_st.id;
+  end if;
+
+  perform write_log(v_leg.shop_id, p_log);
+  return v_leg;
+end;
+$$;
+
+-- ── ค่างวดผ่อนที่จ่ายเองในแอป (ไม่ผ่านบิล) ───────────────────────────────────
+create or replace function public.edit_installment_payment(
+  p_entry   uuid,
+  p_method  text,
+  p_account uuid,
+  p_amount  numeric,
+  p_paid_at timestamptz,
+  p_log     jsonb default null
+) returns card_installment_entries language plpgsql security definer set search_path = public as $$
+declare
+  v_entry card_installment_entries;
+  v_old   numeric(14,2);
+  v_new   text;
+begin
+  select * into v_entry from card_installment_entries where id = p_entry;
+  if not found then raise exception 'ไม่พบงวดผ่อนนี้'; end if;
+  perform assert_can_edit(v_entry.shop_id);
+  if v_entry.status <> 'paid' or v_entry.paid_method is null then
+    raise exception 'งวดนี้ไม่ได้จ่ายเองในแอป (จ่ายรวมในบิล) ให้แก้ที่การจ่ายบิลแทน';
+  end if;
+  if p_amount is null or p_amount <= 0 then raise exception 'จำนวนเงินต้องมากกว่าศูนย์'; end if;
+  if p_method not in ('cash', 'transfer') then raise exception 'วิธีจ่ายไม่ถูกต้อง: %', p_method; end if;
+  if p_method = 'transfer' and p_account is null then raise exception 'ต้องเลือกบัญชี'; end if;
+  if p_paid_at is null then raise exception 'ต้องระบุวันที่จ่าย'; end if;
+
+  v_old := coalesce(v_entry.paid_amount, v_entry.amount);
+  perform apply_wallet_effect(v_entry.shop_id,
+    refund_source(v_entry.shop_id, v_entry.paid_method, v_entry.transfer_account_id), v_old);
+  v_new := case when p_method = 'cash' then 'cash' else 'transfer:' || p_account end;
+  perform apply_wallet_effect(v_entry.shop_id, v_new, -p_amount);
+
+  -- รายจ่ายที่ผูกไว้ต้องตามไปด้วย (trigger กันแก้รายจ่ายค่างวดจากที่อื่น ปลดล็อกเฉพาะที่นี่)
+  perform set_config('jodflow.installment_rpc', '1', true);
+  if v_entry.transaction_id is not null then
+    update transactions
+       set date = (p_paid_at at time zone 'Asia/Bangkok')::date,
+           amount = p_amount, method = p_method,
+           transfer_account_id = case when p_method = 'transfer' then p_account end
+     where id = v_entry.transaction_id;
+  end if;
+
+  update card_installment_entries
+     set paid_amount = p_amount, paid_at = p_paid_at, paid_method = p_method,
+         transfer_account_id = case when p_method = 'transfer' then p_account end
+   where id = p_entry
+   returning * into v_entry;
+
+  perform write_log(v_entry.shop_id, p_log);
+  return v_entry;
+end;
+$$;
+
+-- ── บิลเก่าที่จ่ายไว้ก่อนมีขาการจ่าย (ไม่มีขา) — แก้กระเป๋า/วันที่ของยอดที่จ่ายทั้งใบ ──
+create or replace function public.edit_card_statement_payment(
+  p_statement uuid,
+  p_method    text,
+  p_account   uuid,
+  p_date      date,
+  p_log       jsonb default null
+) returns card_statements language plpgsql security definer set search_path = public as $$
+declare v_st card_statements; v_new text;
+begin
+  select * into v_st from card_statements where id = p_statement;
+  if not found then raise exception 'ไม่พบบิลใบนี้'; end if;
+  perform assert_can_edit(v_st.shop_id);
+  if exists (select 1 from card_statement_payments where statement_id = p_statement) then
+    raise exception 'ใบนี้บันทึกการจ่ายแยกเป็นครั้งๆ ให้แก้ทีละครั้งจากประวัติการจ่าย';
+  end if;
+  if coalesce(v_st.paid_amount, 0) <= 0 then raise exception 'ใบนี้ยังไม่ได้จ่าย'; end if;
+  if v_st.carried_to is not null then
+    raise exception 'ใบนี้ถูกยกยอดไปรวมในบิลรอบถัดไปแล้ว แก้ไขการจ่ายไม่ได้ — แก้ที่บิลใบล่าสุดแทน';
+  end if;
+  if p_method not in ('cash', 'transfer') then raise exception 'วิธีจ่ายไม่ถูกต้อง: %', p_method; end if;
+  if p_method = 'transfer' and p_account is null then raise exception 'ต้องเลือกบัญชีเงินโอน'; end if;
+  if p_date is null then raise exception 'ต้องระบุวันที่จ่าย'; end if;
+
+  perform apply_wallet_effect(v_st.shop_id,
+    refund_source(v_st.shop_id, v_st.paid_method, v_st.transfer_account_id), v_st.paid_amount);
+  v_new := case when p_method = 'cash' then 'cash' else 'transfer:' || p_account end;
+  perform apply_wallet_effect(v_st.shop_id, v_new, -v_st.paid_amount);
+
+  update card_statements
+     set paid_method = p_method,
+         transfer_account_id = case when p_method = 'transfer' then p_account end,
+         paid_at = p_date
+   where id = p_statement
+   returning * into v_st;
+
+  perform write_log(v_st.shop_id, p_log);
+  return v_st;
+end;
+$$;
+
+notify pgrst, 'reload schema';
+
+select 'แก้ไขการจ่ายในที่ (ส่วนที่ 18)' as "รายการ",
+       case when (select count(*) from information_schema.routines
+                   where routine_schema = 'public'
+                     and routine_name in ('edit_card_payment_leg','edit_installment_payment','edit_card_statement_payment')) = 3
+            then '✅' else '❌ ยังไม่ครบ — รันไฟล์นี้ซ้ำอีกรอบ' end as "ผล";

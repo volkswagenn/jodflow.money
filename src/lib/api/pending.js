@@ -142,3 +142,11 @@ export async function undoPendingPayment(id, log = null) {
   const row = await unwrap(supabase.rpc('undo_pending_payment', { p_pending: id, p_log: log }))
   return fromRow('pending_payments', row)
 }
+
+/** แก้ไขการจ่ายรายการค้างชำระในที่ (วิธี/บัญชี/วันที่ — ยอดคือยอดของรายการ) */
+export async function editPendingPayment(id, { method, accountId = null, paidAt, log = null }) {
+  const row = await unwrap(supabase.rpc('edit_pending_payment', {
+    p_pending: id, p_method: method, p_account: accountId, p_paid_at: paidAt, p_log: log,
+  }))
+  return fromRow('pending_payments', row)
+}

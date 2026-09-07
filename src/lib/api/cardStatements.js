@@ -181,3 +181,22 @@ export async function undoPaymentLeg(legId, log = null) {
   const row = await unwrap(supabase.rpc('undo_card_payment_leg', { p_leg: legId, p_log: log }))
   return fromRow('card_statements', row)
 }
+
+/**
+ * แก้ไขขาการจ่ายในที่ (วิธี/บัญชี/ยอด/วันที่) — ฐานข้อมูลคืนเงินเข้ากระเป๋าเดิม
+ * ตัดจากกระเป๋าใหม่ และปรับยอดบิลตามส่วนต่างในคำสั่งเดียว id ขาคงเดิม
+ */
+export async function editPaymentLeg(legId, { method, accountId = null, amount, date, log = null }) {
+  const row = await unwrap(supabase.rpc('edit_card_payment_leg', {
+    p_leg: legId, p_method: method, p_account: accountId, p_amount: amount, p_date: date, p_log: log,
+  }))
+  return fromRow('card_statement_payments', row)
+}
+
+/** บิลเก่าที่ไม่มีขาการจ่าย — แก้กระเป๋า/วันที่ของยอดที่จ่ายทั้งใบ (ยอดคงเดิม) */
+export async function editStatementPayment(statementId, { method, accountId = null, date, log = null }) {
+  const row = await unwrap(supabase.rpc('edit_card_statement_payment', {
+    p_statement: statementId, p_method: method, p_account: accountId, p_date: date, p_log: log,
+  }))
+  return fromRow('card_statements', row)
+}

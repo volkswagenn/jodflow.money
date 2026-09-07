@@ -7,25 +7,25 @@ import useTransactionStore from '../store/useTransactionStore'
 import usePaymentSlipStore from '../store/usePaymentSlipStore'
 import useLogStore from '../store/useLogStore'
 import { buildLogEntry } from './logBuilder'
-import { walletTarget } from './api/transactions'
 import { formatIsoThai } from './cardCycle'
+import { toTimestamp } from '../components/shared/DateTimeField'
 
 const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })
 
 /**
- * ย้อน / แก้ไขวิธีจ่าย ของ "การจ่ายหนึ่งครั้ง" จากหน้าประวัติการจ่าย
+ * แก้ไข / ยกเลิก "การจ่ายหนึ่งครั้ง" จากหน้าประวัติการจ่าย
  *
  * การจ่ายในระบบอยู่กระจายห้าตาราง (บิลบัตร ค่างวดผ่อน งวดหนี้ ค้างชำระ รายการประจำ)
- * แต่ละชนิดย้อนคนละวิธี — ที่นี่รวมเป็นสองคำสั่งเดียว: undo กับ repay
- * โดยยึดกฎเดียวกันทุกชนิด
- *   • เงินกลับเข้ากระเป๋าที่ตัดมาจริง (ฐานข้อมูลเป็นคนคืน ไม่ใช่หน้าจอบวกลบเอง)
- *   • ของที่ถูกทำเครื่องหมายว่าจ่ายแล้วกลับเป็นยังไม่จ่าย (บิล งวด รอบเดือน รายการค้าง)
- *   • ติ๊ก "จ่ายให้รายการนี้แล้ว" บนบิลหายไปพร้อมขาที่จ่าย
- *   • สลิปที่แนบไว้ตามไปอยู่กับการจ่ายครั้งใหม่เมื่อแก้ไข และถูกลบเมื่อยกเลิก
+ * แต่ละชนิดมีกติกาเงินคนละแบบ — ที่นี่รวมเป็นสองคำสั่ง: edit กับ undo โดยยึดกฎเดียวกัน
  *
- * "แก้ไขวิธีจ่าย" = ย้อนแล้วจ่ายใหม่ด้วยยอดเดิมผ่าน RPC ตัวเดิมที่ใช้จ่ายครั้งแรก
- * ไม่มีทางลัดแก้ช่องกระเป๋าตรงๆ เพราะยอดกระเป๋าไม่ใช่ตัวเลขที่แก้แล้วจบ
- * ถ้าจ่ายใหม่ล้ม รายการจะค้างเป็น "ยังไม่จ่าย" ซึ่งเห็นได้และจ่ายซ้ำได้ ไม่มีเงินหาย
+ *   แก้ไข  = แก้ "ในที่" คำสั่งเดียวจบ: ฐานข้อมูลคืนเงินเข้ากระเป๋าเดิม ตัดจากกระเป๋าใหม่
+ *            ปรับยอดบิล/หนี้ตามส่วนต่าง แล้วแก้วันที่/ยอด/วิธี — id ของการจ่ายคงเดิม
+ *            สลิป ติ๊ก "จ่ายให้รายการนี้" และประวัติจึงอยู่ครบ ไม่มีจังหวะที่รายการกลายเป็น
+ *            "ยังไม่จ่าย" และถ้าล้มตรงไหนทั้งก้อนย้อนกลับเอง
+ *            (โปรแกรมบัญชีใหญ่ๆ บังคับให้ลบแล้วบันทึกใหม่ ซึ่งเป็นคำบ่นอันดับต้นๆ ของผู้ใช้
+ *             ที่นี่ทำแบบแก้ในที่ แต่เก็บค่าก่อน/หลังไว้ในประวัติทั้งหมดให้ตรวจสอบย้อนหลังได้)
+ *   ยกเลิก = เงินกลับเข้ากระเป๋าที่ตัดมาจริง ของที่ถูกทำเครื่องหมายว่าจ่ายแล้วกลับเป็น
+ *            ยังไม่จ่าย ติ๊กบนบิลหาย สลิปถูกลบ
  */
 
 const stores = () => ({
@@ -53,8 +53,25 @@ function legOf(row) {
   return useCreditCardStore.getState().statementPayments.find((l) => l.id === row.refId) ?? null
 }
 
+/** 'YYYY-MM-DD' ตามเวลาเครื่อง จากค่าที่เป็นวันล้วนหรือเวลาเต็ม */
+const dayOf = (v) => {
+  if (!v) return null
+  if (typeof v === 'string' && !v.includes('T')) return v.slice(0, 10)
+  const d = new Date(v)
+  if (Number.isNaN(d.getTime())) return String(v).slice(0, 10)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+/** 'HH:mm' จากเวลาเต็ม — เที่ยงตรงคือค่าตั้งต้นของ "ไม่รู้เวลา" จึงถือว่าว่าง */
+const timeOf = (v) => {
+  if (!v || typeof v !== 'string' || !v.includes('T')) return ''
+  const d = new Date(v)
+  if (Number.isNaN(d.getTime())) return ''
+  const t = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  return t === '12:00' ? '' : t
+}
+
 /**
- * แผนการย้อน — ตอบว่า "ย้อนได้ไหม" และ "จะเกิดอะไรขึ้นบ้าง" เป็นบรรทัดภาษาคน
+ * แผนการยกเลิก — ตอบว่า "ย้อนได้ไหม" และ "จะเกิดอะไรขึ้นบ้าง" เป็นบรรทัดภาษาคน
  * ใช้ทั้งปิดปุ่ม (พร้อมเหตุผล) และเป็นข้อความยืนยันก่อนกด — ผู้ใช้ต้องรู้ทุกอย่างที่จะ
  * ถูกย้ายกลับก่อนกด ไม่ใช่มารู้ทีหลังว่าติ๊กหาย
  */
@@ -63,7 +80,7 @@ export function undoPlan(row) {
   const money = (src) => (row.incoming
     ? `ถอน ${fmt(row.amount)} บาท ออกจาก${src} (เงินที่รับมาต้องออกไป)`
     : `คืน ${fmt(row.amount)} บาท เข้า${src}`)
-  const slipLine = row.slip ? 'สลิปที่แนบไว้กับการจ่ายนี้จะถูกลบ' : null
+  const slipLine = row.slip?.attachments?.length ? 'สลิปที่แนบไว้กับการจ่ายนี้จะถูกลบ' : null
 
   if (row.kind === 'card_bill') {
     const st = row.ref
@@ -117,6 +134,95 @@ export function undoPlan(row) {
   return { ok: true, lines }
 }
 
+/**
+ * แผนการแก้ไข — แก้ได้ไหม แก้ช่องไหนได้บ้าง และค่าปัจจุบันสำหรับเติมฟอร์ม
+ *   amount  แก้ยอดได้ไหม (รายการค้างชำระยอดคือยอดของรายการ · บิลเก่าไม่มีขาแก้ยอดไม่ได้)
+ *   time    เก็บเวลาไหม (บิลบัตรกับงวดหนี้เก็บเป็นวันล้วน)
+ *   maxAmount เพดานยอด (ขาที่จ่ายก่อนออกบิลห้ามเกินยอดรายการ)
+ */
+export function editPlan(row) {
+  const base = { ok: true, amount: true, time: false, maxAmount: null }
+  const cur = (method, accountId, amount = row.amount) => ({
+    method: method === 'transfer' ? 'transfer' : 'cash',
+    accountId: method === 'transfer' ? (accountId ?? null) : null,
+    amount: Number(amount),
+    date: row.day ?? dayOf(row.paidAt),
+    time: timeOf(row.paidAt),
+    note: row.slip?.note ?? '',
+  })
+
+  if (row.kind === 'card_bill') {
+    const st = row.ref
+    if (st?.carriedTo) return { ok: false, reason: 'ใบนี้ถูกยกยอดไปรวมในบิลรอบถัดไปแล้ว แก้ได้ที่บิลใบล่าสุดในหน้าบัตรเท่านั้น' }
+    if (row.legacy) return { ...base, amount: false, current: cur(st?.paidMethod, st?.transferAccountId) }
+    const leg = legOf(row)
+    if (!leg) return { ok: false, reason: 'ไม่พบขาการจ่ายนี้แล้ว (อาจถูกย้อนไปก่อนหน้า) — รีเฟรชหน้า' }
+    let maxAmount = null
+    if (!leg.statementId) {
+      const tx = useTransactionStore.getState().transactions.find((t) => t.id === leg.transactionId)
+      if (!tx) return { ok: false, reason: 'รายการที่จ่ายให้ถูกลบไปแล้ว แก้ไขไม่ได้' }
+      const others = useCreditCardStore.getState().statementPayments
+        .filter((l) => l.transactionId === leg.transactionId && !l.statementId && l.id !== leg.id)
+        .reduce((n, l) => n + Number(l.amount), 0)
+      maxAmount = Number(tx.amount) - others
+    }
+    return { ...base, maxAmount, current: cur(leg.method, leg.transferAccountId, leg.amount) }
+  }
+  if (row.kind === 'card_installment') {
+    const e = row.ref
+    if (!e.paidMethod) return { ok: false, reason: 'งวดนี้จ่ายรวมในบิลบัตร ให้แก้ที่การจ่ายบิลใบนั้นแทน' }
+    return { ...base, time: true, current: cur(e.paidMethod, e.transferAccountId, e.paidAmount ?? e.amount) }
+  }
+  if (row.kind === 'debt') {
+    const e = row.ref
+    if (!e.paidMethod) return { ok: false, reason: 'งวดนี้ไม่ได้บันทึกว่าจ่ายจากกระเป๋าไหน ระบบย้ายเงินให้ไม่ได้' }
+    return { ...base, current: cur(e.paidMethod, e.transferAccountId, e.amount) }
+  }
+  if (row.kind === 'pending') {
+    const p = row.ref
+    if (!p.paidMethod) return { ok: false, reason: 'รายการนี้ไม่ได้บันทึกว่าจ่ายจากกระเป๋าไหน ระบบย้ายเงินให้ไม่ได้' }
+    return { ...base, amount: false, time: true, current: cur(p.paidMethod, p.transferAccountId, p.amount) }
+  }
+  if (row.kind === 'recurring') {
+    const e = row.ref
+    if (e.pendingPaymentId) {
+      return { ok: false, reason: 'รอบนี้ถูกจ่ายผ่าน "รายการค้างชำระ" — ให้แก้ที่แถวของรายการค้างชำระนั้นแทน (แท็บ รายการค้างชำระ)' }
+    }
+    if (!e.paidMethod && !e.transactionId) return { ok: false, reason: 'รอบนี้ไม่ได้บันทึกว่าจ่ายจากกระเป๋าไหน ระบบย้ายเงินให้ไม่ได้' }
+    return { ...base, time: true, current: cur(e.paidMethod, e.transferAccountId, e.amount) }
+  }
+  return { ok: false, reason: 'ยังไม่รองรับการแก้ไขของรายการชนิดนี้' }
+}
+
+const sameMoney = (a, b) =>
+  a.method === b.method && (a.accountId ?? null) === (b.accountId ?? null) && Math.abs(Number(a.amount) - Number(b.amount)) < 0.005
+const sameWhen = (a, b, withTime) => a.date === b.date && (!withTime || (a.time || '') === (b.time || ''))
+
+/**
+ * บอกล่วงหน้าว่ากดบันทึกแล้วระบบจะทำอะไรให้บ้าง — โชว์ใต้ฟอร์มตลอดเวลาที่แก้
+ * คืน [] เมื่อยังไม่มีอะไรเปลี่ยน
+ */
+export function describeEdit(row, form, plan) {
+  const cur = plan.current
+  const lines = []
+  const verbIn = row.incoming ? 'ถอน' : 'คืน'
+  const verbOut = row.incoming ? 'รับเข้า' : 'ตัดจาก'
+  const srcChanged = cur.method !== form.method || (cur.accountId ?? null) !== (form.accountId ?? null)
+  const amtChanged = plan.amount && Math.abs(Number(cur.amount) - Number(form.amount)) > 0.005
+  if (srcChanged || amtChanged) {
+    lines.push(`${verbIn} ${fmt(cur.amount)} บาท ${row.incoming ? 'ออกจาก' : 'เข้า'}${sourceName(cur.method, cur.accountId)} → ${verbOut}${sourceName(form.method, form.accountId)} ${fmt(form.amount)} บาท`)
+    if (amtChanged && row.kind === 'card_bill') {
+      const d = Number(form.amount) - Number(cur.amount)
+      lines.push(d > 0 ? `ยอดที่จ่ายบิลเพิ่มขึ้น ${fmt(d)} (หนี้บัตรลดลงเท่ากัน)` : `ยอดที่จ่ายบิลลดลง ${fmt(-d)} (หนี้บัตรเพิ่มขึ้นเท่ากัน)`)
+    }
+  }
+  if (!sameWhen(cur, form, plan.time)) {
+    lines.push(`วันที่จ่ายเปลี่ยนเป็น ${formatIsoThai(form.date)}${plan.time && form.time ? ` ${form.time} น.` : ''}`)
+  }
+  if ((form.note ?? '') !== (cur.note ?? '')) lines.push(form.note ? 'บันทึกเพิ่มเติมถูกอัปเดต' : 'ลบบันทึกเพิ่มเติม')
+  return lines
+}
+
 /** ดึงข้อมูลใหม่ทุกร้านที่การจ่ายชนิดนี้แตะ — ยอดกระเป๋าและสถานะต้องตรงกับฐานข้อมูลทันที */
 async function refreshFor(kind) {
   const s = stores()
@@ -135,7 +241,7 @@ const logEntry = (type, row, description, extra = {}) => buildLogEntry({
   ...extra,
 })
 
-/** ย้อนการจ่ายหนึ่งครั้ง — คืนเงิน คืนสถานะ ลบสลิป */
+/** ยกเลิกการจ่ายหนึ่งครั้ง — คืนเงิน คืนสถานะ ลบสลิป */
 export async function undoPaymentRow(row) {
   const plan = undoPlan(row)
   if (!plan.ok) throw new Error(plan.reason)
@@ -166,110 +272,62 @@ export async function undoPaymentRow(row) {
 }
 
 /**
- * จ่ายซ้ำด้วยวิธี/บัญชี/วันที่ใหม่ ยอดเท่าเดิม — ใช้หลัง undo ในการ "แก้ไขวิธีจ่าย"
- * คืน refId ของการจ่ายครั้งใหม่ (ขาการจ่ายบิลได้ id ใหม่ ชนิดอื่นใช้ id เดิม)
+ * แก้ไขการจ่ายในที่ — คำสั่งเดียวต่อชนิด ฐานข้อมูลย้ายเงินให้เอง
+ * form = { method, accountId, amount, date, time, note }
+ * แตะเฉพาะส่วนที่เปลี่ยน: เงิน/วันที่ไม่เปลี่ยนก็ไม่เรียก RPC (แก้แค่บันทึกเพิ่มเติมได้)
+ * คืนบรรทัดสรุปว่าทำอะไรไปบ้าง
  */
-async function repay(row, { method, accountId, date }) {
-  const s = stores()
-  const amount = Number(row.amount)
-  const log = logEntry('PAYMENT_EDIT', row,
-    `แก้ไขวิธีจ่าย "${row.title}" ${fmt(amount)} บาท → ${sourceName(method, accountId)} วันที่ ${formatIsoThai(date)}`,
-    { newValue: { method, accountId, date, amount } })
-
-  if (row.kind === 'card_bill') {
-    if (row.legacy) {
-      await s.card.payStatement(row.ref.id, { method, accountId, amount, date, log })
-      return newestLegId(row.ref.id, amount)
-    }
-    const leg = legOf(row)
-    if (leg.statementId) {
-      await s.card.payStatement(leg.statementId, { method, accountId, amount, date, log, transactionId: leg.transactionId ?? null })
-      return newestLegId(leg.statementId, amount)
-    }
-    const newLeg = await s.card.prepayTransaction(leg.transactionId, { method, accountId, amount, date, log })
-    return newLeg?.id ?? null
-  }
-  if (row.kind === 'card_installment') {
-    await s.card.payEntry(row.ref.id, { method, accountId, amount, paidAt: new Date(`${date}T12:00:00`).toISOString(), log })
-    return row.refId
-  }
-  if (row.kind === 'debt') {
-    await s.debt.payEntry(row.ref.id, { method, accountId, amount, date, log })
-    return row.refId
-  }
-  if (row.kind === 'pending') {
-    await s.pending.payPendingAtomic(row.ref.id, { method, accountId, date, log })
-    return row.refId
-  }
-  if (row.kind === 'recurring') {
-    // ทางเดียวกับหน้ารายการประจำ: รายจ่าย + ตัดเงิน + log จบใน RPC เดียว แล้วผูกรอบ
-    const e = row.ref
-    const item = s.recurring.items.find((i) => i.id === e.recurringId)
-    const target = walletTarget(method, { transferAccountId: accountId })
-    if (!target) throw new Error('กรุณาเลือกบัญชีเงินโอน')
-    const tx = await s.tx.addTransaction({
-      type: 'expense', date, amount, category: item?.category ?? null, method,
-      ...(accountId ? { transferAccountId: accountId } : {}),
-      itemName: item?.name ?? row.title, vendor: item?.vendor ?? null, note: item?.note ?? null,
-      recurringEntryId: e.id,
-    }, { effect: { target, delta: -amount }, log })
-    await s.recurring.updateEntry(e.id, {
-      status: 'paid', amount, paidMethod: method, transferAccountId: accountId ?? null, cardId: null,
-      paidAt: new Date(`${date}T12:00:00`).toISOString(), transactionId: tx?.id ?? null, pendingPaymentId: null,
-    })
-    return row.refId
-  }
-  throw new Error('ยังไม่รองรับการแก้ไขของรายการชนิดนี้')
-}
-
-/** ขาล่าสุดของใบ (หลัง refresh) — pay_card_statement คืนใบ ไม่คืนขา จึงต้องหาเอง */
-function newestLegId(statementId, amount) {
-  const legs = useCreditCardStore.getState().statementPayments
-    .filter((l) => l.statementId === statementId && Math.abs(Number(l.amount) - amount) < 0.005)
-    .sort((a, b) => String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')))
-  return legs[0]?.id ?? null
-}
-
-/**
- * แก้ไขวิธีจ่าย = ย้อน แล้วจ่ายใหม่ยอดเดิม แล้วย้ายสลิป (ถ้ามี) ไปอยู่กับการจ่ายครั้งใหม่
- * ถ้าขั้นจ่ายใหม่ล้ม การย้อนไปแล้วไม่ถูกดึงกลับ — รายการจะค้างเป็น "ยังไม่จ่าย"
- * ซึ่งเห็นได้ชัดและกดจ่ายซ้ำได้ ดีกว่าพยายามย้อนซ้อนแล้วได้สถานะที่ไม่มีใครรู้ว่าอยู่ตรงไหน
- */
-export async function editPaymentRow(row, params) {
-  if (!params.method) throw new Error('เลือกวิธีจ่าย')
-  if (params.method === 'transfer' && !params.accountId) throw new Error('เลือกบัญชีเงินโอน')
-  if (!params.date) throw new Error('เลือกวันที่จ่าย')
-  // เงินสดไม่มีบัญชี — ไม่ส่ง id บัญชีที่ค้างจากฟอร์มติดไปให้ RPC ตีความ
-  params = { ...params, accountId: params.method === 'transfer' ? params.accountId : null }
-  const plan = undoPlan(row)
+export async function editPaymentRow(row, form) {
+  const plan = editPlan(row)
   if (!plan.ok) throw new Error(plan.reason)
+  if (!form.method) throw new Error('เลือกวิธีจ่าย')
+  if (form.method === 'transfer' && !form.accountId) throw new Error('เลือกบัญชีเงินโอน')
+  if (!form.date) throw new Error('เลือกวันที่จ่าย')
+  const amount = plan.amount ? Number(form.amount) : Number(plan.current.amount)
+  if (!(amount > 0)) throw new Error('จำนวนเงินต้องมากกว่าศูนย์')
+  if (plan.maxAmount != null && amount > plan.maxAmount + 0.005) {
+    throw new Error(`จ่ายเกินยอดของรายการ — ใส่ได้ไม่เกิน ${fmt(plan.maxAmount)} บาท`)
+  }
+  // เงินสดไม่มีบัญชี — ไม่ส่ง id บัญชีที่ค้างจากฟอร์มติดไปให้ RPC ตีความ
+  const next = { method: form.method, accountId: form.method === 'transfer' ? form.accountId : null, amount, date: form.date, time: form.time || '' }
+  const lines = describeEdit(row, { ...next, note: form.note ?? '' }, plan)
+  if (lines.length === 0) return []
 
   const s = stores()
-  const slip = row.slip
-  // ย้อนโดยไม่ลบสลิป (ต่างจาก undoPaymentRow) เพราะจะย้ายไปครั้งใหม่
-  const undoLog = logEntry('PAYMENT_UNDO', row, `ย้อนเพื่อแก้ไขวิธีจ่าย "${row.title}" ${fmt(row.amount)} บาท`)
-  if (row.kind === 'card_bill') {
-    if (row.legacy) await s.card.undoPayment(row.ref.id, row.amount, undoLog)
-    else {
-      const leg = legOf(row)
-      if (leg.statementId) await s.card.undoPaymentLeg(leg.id, undoLog)
-      else await s.card.undoPrepayment(leg.id, undoLog)
+  const cur = plan.current
+  const moneyOrWhenChanged = !sameMoney(cur, next) || !sameWhen(cur, next, plan.time)
+  const paidAt = toTimestamp(next.date, plan.time ? next.time : '')
+
+  if (moneyOrWhenChanged) {
+    const log = logEntry('PAYMENT_EDIT', row,
+      `แก้ไขรายการจ่าย "${row.title}" — ${lines.join(' · ')}`,
+      {
+        oldValue: { kind: row.kind, refId: row.refId, method: cur.method, accountId: cur.accountId, amount: cur.amount, date: cur.date, time: cur.time },
+        newValue: { kind: row.kind, refId: row.refId, ...next },
+      })
+    if (row.kind === 'card_bill') {
+      if (row.legacy) await s.card.editStatementPayment(row.ref.id, { method: next.method, accountId: next.accountId, date: next.date, log })
+      else await s.card.editPaymentLeg(row.refId, { method: next.method, accountId: next.accountId, amount, date: next.date, log })
+    } else if (row.kind === 'card_installment') {
+      await s.card.editEntryPayment(row.ref.id, { method: next.method, accountId: next.accountId, amount, paidAt, log })
+    } else if (row.kind === 'debt') {
+      await s.debt.editEntryPayment(row.ref.id, { method: next.method, accountId: next.accountId, amount, date: next.date, log })
+    } else if (row.kind === 'pending') {
+      await s.pending.editPendingPayment(row.ref.id, { method: next.method, accountId: next.accountId, paidAt, log })
+    } else if (row.kind === 'recurring') {
+      await s.recurring.editEntryPayment(row.ref.id, { method: next.method, accountId: next.accountId, amount, paidAt, log })
     }
-  } else if (row.kind === 'card_installment') await s.card.undoEntry(row.ref.id, undoLog)
-  else if (row.kind === 'debt') await s.debt.undoEntry(row.ref.id, undoLog)
-  else if (row.kind === 'pending') await s.pending.undoPendingPayment(row.ref.id, undoLog)
-  else if (row.kind === 'recurring') await s.recurring.undoEntryPayment(row.ref.id, undoLog)
-
-  let newRefId = null
-  try {
-    newRefId = await repay(row, params)
-  } finally {
-    await refreshFor(row.kind)
   }
 
-  if (slip && newRefId && newRefId !== row.refId) {
-    await s.slip.save({ kind: row.kind, refId: newRefId, paidAt: `${params.date}T12:00:00`, attachments: slip.attachments, note: slip.note })
-    try { await s.slip.remove(slip.id) } catch { /* ของเก่าหายไปเองก็ได้ */ }
+  // บันทึกเพิ่มเติมอยู่กับสลิป (แถวสลิปมีได้แม้ไม่มีไฟล์) — id การจ่ายคงเดิม สลิปไม่ต้องย้าย
+  const note = (form.note ?? '').trim()
+  const noteChanged = note !== (cur.note ?? '')
+  if (noteChanged || (row.slip && moneyOrWhenChanged)) {
+    if (row.slip || note) {
+      await s.slip.save({ kind: row.kind, refId: row.refId, paidAt, attachments: row.slip?.attachments ?? [], note: note || null })
+    }
   }
-  return newRefId
+
+  await refreshFor(row.kind)
+  return lines
 }
