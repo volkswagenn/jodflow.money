@@ -11,6 +11,10 @@ import FileUploadPopup from '../../components/shared/FileUploadPopup'
 import AttachmentViewerPopup, { getAttachments } from '../../components/shared/AttachmentViewer'
 import DateRangeFilter from '../../components/shared/DateRangeFilter'
 import { formatIsoThai } from '../../lib/cardCycle'
+import ConfirmPopup from '../../components/shared/ConfirmPopup'
+import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
+import DatePicker from '../../components/shared/DatePicker'
+import { undoPlan, undoPaymentRow, editPaymentRow } from '../../lib/paymentActions'
 
 const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })
 
@@ -68,6 +72,11 @@ export default function PaymentsPage() {
   const [viewSlip, setViewSlip] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  // ผลของการย้อน/แก้ไข — ป๊อปอัปปิดไปแล้ว ต้องมีที่บอกว่าเกิดอะไรขึ้นกับเงิน
+  const [notice, setNotice] = useState('')
+  // ฟอร์มแก้ไขวิธีจ่ายในป๊อปอัป: { method, accountId, date } · null = ยังไม่ได้กดแก้
+  const [editing, setEditing] = useState(null)
+  const [confirmUndo, setConfirmUndo] = useState(null)
   // ตารางสลิปเป็นของที่ต้องรัน SQL เพิ่มทีหลัง ถ้ายังไม่ได้รัน หน้านี้ยังอ่านประวัติได้ปกติ
   // แต่แนบสลิปไม่ได้ ต้องบอกไว้ตั้งแต่ต้น ไม่ใช่ปล่อยให้อัปโหลดไฟล์เสร็จแล้วค่อยพัง
   const canAttach = slipsInstalled()
@@ -127,6 +136,42 @@ export default function PaymentsPage() {
       setDetail((d) => (d && d.key === row.key ? { ...d, slip: null } : d))
     } catch (err) {
       setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /**
+   * ย้อน / แก้ไขวิธีจ่าย — ตัวทำงานจริงอยู่ใน lib/paymentActions (คืนเงิน คืนสถานะ
+   * เอาติ๊กออก ย้ายสลิป) หน้านี้แค่ถามยืนยัน เรียก แล้วบอกผล
+   */
+  const closeDetail = () => { setDetail(null); setEditing(null); setConfirmUndo(null) }
+
+  const runUndo = async (row) => {
+    setBusy(true); setError(''); setNotice('')
+    try {
+      await undoPaymentRow(row)
+      setNotice(`ยกเลิกการจ่าย "${row.title}" ${fmt(row.amount)} บาท แล้ว — เงินกลับเข้า${row.source ?? 'กระเป๋าเดิม'} และรายการกลับเป็นยังไม่จ่าย`)
+      closeDetail()
+    } catch (err) {
+      setError(err.message)
+      setConfirmUndo(null)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const runEdit = async (row) => {
+    setBusy(true); setError(''); setNotice('')
+    try {
+      await editPaymentRow(row, editing)
+      setNotice(`แก้ไขวิธีจ่าย "${row.title}" ${fmt(row.amount)} บาท แล้ว — เงินคืนเข้า${row.source ?? 'กระเป๋าเดิม'} และตัดจากกระเป๋าใหม่ตามที่เลือก`)
+      closeDetail()
+    } catch (err) {
+      // จ่ายใหม่ล้มหลังย้อนไปแล้ว = รายการค้างเป็น "ยังไม่จ่าย" ต้องบอกให้ไปจ่ายซ้ำ ไม่ใช่ปล่อยงง
+      setError(`${err.message} — ถ้าการย้อนสำเร็จไปแล้ว รายการนี้จะกลับเป็น "ยังไม่จ่าย" ให้ไปกดจ่ายใหม่ที่หน้าของรายการนั้น`)
+      setEditing(null)
+      setDetail(null)
     } finally {
       setBusy(false)
     }
@@ -197,6 +242,12 @@ export default function PaymentsPage() {
         </p>
       )}
       {error && <p className="text-[12.5px] text-expense bg-expense-soft border border-[#F0C4BE] rounded-ctl px-3.5 py-2.5">{error}</p>}
+      {notice && (
+        <p className="text-[12.5px] text-[#0F6A50] bg-income-soft border border-[#BFE0D2] rounded-ctl px-3.5 py-2.5 flex items-start gap-2">
+          <span className="flex-1 leading-relaxed">✓ {notice}</span>
+          <button onClick={() => setNotice('')} className="flex-none text-[#0F6A50]/70 hover:text-[#0F6A50]" title="ปิด">✕</button>
+        </p>
+      )}
 
       {shown.length === 0 ? (
         <div className="card px-4 py-10 text-center text-[12.5px] text-muted">
@@ -254,7 +305,8 @@ export default function PaymentsPage() {
                     {r.incoming ? '+' : ''}{fmt(r.amount)}
                   </span>
                   <button
-                    onClick={() => setDetail(r)}
+                    // เปิดแถวใหม่ต้องเริ่มจากหน้ารายละเอียด ไม่ใช่ฟอร์มแก้ไขที่ค้างจากแถวก่อน
+                    onClick={() => { setEditing(null); setConfirmUndo(null); setDetail(r) }}
                     className="flex-none w-7 h-7 rounded-[8px] flex items-center justify-center text-faint hover:text-ink hover:bg-paper"
                     title="ดูรายละเอียด"
                   >
@@ -300,6 +352,95 @@ export default function PaymentsPage() {
             </p>
           )}
 
+          {/* ── แก้ไข / ยกเลิกการจ่ายนี้ ──────────────────────────────────────
+              จ่ายผิดกระเป๋าเป็นเรื่องที่เกิดทุกเดือน ต้องแก้ได้จากที่ที่เห็นประวัติ ไม่ใช่
+              ให้ไล่กลับไปหาปุ่มย้อนของแต่ละหน้า ปุ่มเป็นกล่องสี่เหลี่ยมชุดเดียวกับเมนูอื่น */}
+          {(() => {
+            const plan = undoPlan(detail)
+            if (editing) {
+              return (
+                <div className="border-t border-[#F6F4EF] pt-2.5 flex flex-col gap-2.5">
+                  <div className="text-[12px] font-semibold">แก้ไขวิธีจ่าย — ยอดเท่าเดิม {fmt(detail.amount)} บาท</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { v: 'cash', icon: 'payments', t: 'เงินสด' },
+                      { v: 'transfer', icon: 'account_balance', t: 'เงินโอน' },
+                    ].map((m) => {
+                      const on = editing.method === m.v
+                      return (
+                        <button
+                          key={m.v}
+                          onClick={() => setEditing((e) => ({ ...e, method: m.v }))}
+                          className={`h-[42px] rounded-[11px] border flex items-center justify-center gap-2 text-[12.5px] font-semibold transition ${
+                            on ? 'border-ink shadow-[0_0_0_1px_#16181D] bg-[#F2FAD9]' : 'border-hairline bg-white hover:border-ink'
+                          }`}
+                        >
+                          <Icon name={m.icon} size={17} className={on ? 'text-ink' : 'text-faint'} />
+                          {m.t}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  {editing.method === 'transfer' && (
+                    <TransferAccountPicker
+                      value={editing.accountId}
+                      onChange={(id) => setEditing((e) => ({ ...e, accountId: id }))}
+                      label={detail.incoming ? 'รับเข้าบัญชี' : 'ตัดจากบัญชี'}
+                    />
+                  )}
+                  <div>
+                    <label className="label">วันที่จ่าย</label>
+                    <DatePicker value={editing.date} onChange={(d) => setEditing((e) => ({ ...e, date: d }))} />
+                  </div>
+                  <p className="text-[11px] text-faint leading-relaxed">
+                    ระบบจะย้อนการจ่ายเดิม (เงินคืนเข้า{detail.source ?? 'กระเป๋าเดิม'}) แล้วจ่ายใหม่ยอดเท่าเดิมจากกระเป๋าที่เลือก
+                    · สลิปที่แนบไว้จะตามไปอยู่กับการจ่ายครั้งใหม่
+                  </p>
+                  <div className="flex gap-2 justify-end">
+                    <button onClick={() => setEditing(null)} disabled={busy} className="h-[38px] px-4 rounded-[11px] border border-hairline bg-white text-[13px] font-semibold hover:bg-paper disabled:opacity-50">
+                      ยกเลิก
+                    </button>
+                    <button onClick={() => runEdit(detail)} disabled={busy} className="h-[38px] px-[18px] rounded-[11px] bg-ink text-white text-[13px] font-semibold hover:bg-black disabled:opacity-50">
+                      {busy ? 'กำลังบันทึก…' : 'บันทึกการแก้ไข'}
+                    </button>
+                  </div>
+                </div>
+              )
+            }
+            return (
+              <div className="border-t border-[#F6F4EF] pt-2.5">
+                <div className="text-[11.5px] text-faint mb-1.5">จัดการการจ่ายนี้</div>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    disabled={busy || !plan.ok}
+                    onClick={() => setEditing({
+                      method: detail.source === 'เงินสด' ? 'cash' : 'transfer',
+                      accountId: detail.ref?.transferAccountId ?? null,
+                      date: detail.day ?? format(new Date(), 'yyyy-MM-dd'),
+                    })}
+                    title={plan.ok ? 'เปลี่ยนกระเป๋าที่ตัดเงิน หรือวันที่ ยอดเท่าเดิม' : plan.reason}
+                    className="aspect-square border border-hairline rounded-[12px] bg-white flex flex-col items-center justify-center gap-[5px] p-2 text-center hover:bg-[#F2FAD9] hover:border-ink disabled:opacity-40 disabled:hover:bg-white disabled:hover:border-hairline"
+                  >
+                    <span className="w-[34px] h-[34px] rounded-[10px] bg-[#F4F3EF] flex items-center justify-center"><Icon name="swap_horiz" size={19} className="text-[#5C6068]" /></span>
+                    <span className="text-[12px] font-semibold leading-tight">แก้ไขวิธีจ่าย</span>
+                    <span className="text-[10.5px] text-faint leading-[1.3]">กระเป๋า · วันที่</span>
+                  </button>
+                  <button
+                    disabled={busy || !plan.ok}
+                    onClick={() => setConfirmUndo(detail)}
+                    title={plan.ok ? 'คืนเงินและคืนสถานะทั้งหมด' : plan.reason}
+                    className="aspect-square border border-hairline rounded-[12px] bg-white flex flex-col items-center justify-center gap-[5px] p-2 text-center hover:bg-expense-soft hover:border-expense disabled:opacity-40 disabled:hover:bg-white disabled:hover:border-hairline"
+                  >
+                    <span className="w-[34px] h-[34px] rounded-[10px] bg-expense-soft flex items-center justify-center"><Icon name="undo" size={19} className="text-expense" /></span>
+                    <span className="text-[12px] font-semibold leading-tight text-expense">ยกเลิกการจ่าย</span>
+                    <span className="text-[10.5px] text-faint leading-[1.3]">เงินกลับ ติ๊กออก</span>
+                  </button>
+                </div>
+                {!plan.ok && <p className="text-[11px] text-[#8A6A15] leading-relaxed mt-1.5">{plan.reason}</p>}
+              </div>
+            )
+          })()}
+
           <div className="border-t border-[#F6F4EF] pt-2.5">
             <div className="text-[11.5px] text-faint mb-1.5">สลิป / หลักฐานการโอน</div>
             {getAttachments(detail.slip).length > 0 ? (
@@ -338,6 +479,23 @@ export default function PaymentsPage() {
           </div>
         </Popup>
       )}
+
+      <ConfirmPopup
+        open={!!confirmUndo}
+        danger
+        title="ยกเลิกการจ่ายนี้?"
+        confirmLabel={busy ? 'กำลังย้อน…' : 'ยกเลิกการจ่าย'}
+        message={confirmUndo ? [
+          `"${confirmUndo.title}" ${fmt(confirmUndo.amount)} บาท · จ่ายเมื่อ ${whenText(confirmUndo.paidAt)}`,
+          '',
+          'ระบบจะทำสิ่งเหล่านี้ทั้งหมด:',
+          ...(undoPlan(confirmUndo).lines ?? []).map((l) => `• ${l}`),
+          '',
+          'ทุกอย่างถูกบันทึกไว้ในประวัติทั้งหมด',
+        ].join('\n') : ''}
+        onConfirm={() => runUndo(confirmUndo)}
+        onCancel={() => setConfirmUndo(null)}
+      />
 
       {uploadFor && (
         <FileUploadPopup

@@ -124,6 +124,9 @@ select * from (
             else 'ยังไม่มี → รัน ' || t.file end
   from (values
     ('pay_installment_entry',  'card.sql'),
+    ('undo_card_payment_leg',  'card.sql'),
+    ('undo_pending_payment',   'wallet.sql'),
+    ('undo_recurring_entry',   'recurring.sql'),
     ('undo_installment_entry', 'card.sql'),
     ('attach_installment_to_closed_statements', 'card.sql'),
     ('attach_transaction_to_statement',         'card.sql'),

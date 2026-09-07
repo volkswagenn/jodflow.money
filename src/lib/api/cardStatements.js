@@ -172,3 +172,12 @@ export async function assignStatementPayment(transactionId, log = null) {
 export async function unassignStatementPayment(transactionId, log = null) {
   await unwrap(supabase.rpc('unassign_statement_payment', { p_transaction: transactionId, p_log: log }))
 }
+
+/**
+ * ย้อนการจ่ายบิล "ขาเดียว" ที่ระบุ — ใช้จากหน้าประวัติการจ่าย
+ * undoPayment ย้อนขาล่าสุดตามจำนวนเงิน ถ้าเลือกย้อนขากลางจะไปคืนผิดกระเป๋า
+ */
+export async function undoPaymentLeg(legId, log = null) {
+  const row = await unwrap(supabase.rpc('undo_card_payment_leg', { p_leg: legId, p_log: log }))
+  return fromRow('card_statements', row)
+}

@@ -135,3 +135,9 @@ export async function updateRecurringEntry(id, changes) {
     supabase.from('recurring_entries').update(toRow('recurring_entries', changes)).eq('id', id).select().single()
   ))
 }
+
+/** ย้อนการจ่ายรอบเดือนหนึ่งรอบ: คืนเงินตามรายจ่ายที่ผูกอยู่ ลบรายจ่าย กลับเป็นยังไม่จ่าย */
+export async function undoRecurringEntry(id, log = null) {
+  const row = await unwrap(supabase.rpc('undo_recurring_entry', { p_entry: id, p_log: log }))
+  return fromRow('recurring_entries', row)
+}

@@ -136,3 +136,9 @@ export async function deleteTaxInvoiceByTxId(transactionId) {
     supabase.from('tax_invoices').delete().eq('shop_id', getShopId()).eq('transaction_id', transactionId)
   )
 }
+
+/** ย้อนการจ่ายรายการค้างชำระ: คืนเงิน ลบรายจ่าย กลับเป็นค้างชำระ (และรอบประจำที่ผูกอยู่) */
+export async function undoPendingPayment(id, log = null) {
+  const row = await unwrap(supabase.rpc('undo_pending_payment', { p_pending: id, p_log: log }))
+  return fromRow('pending_payments', row)
+}

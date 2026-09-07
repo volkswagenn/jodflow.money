@@ -187,6 +187,13 @@ const useCreditCardStore = create((set, get) => ({
     await get().refresh()
   },
 
+  /** ย้อนขาการจ่ายบิลขาเดียวที่ระบุ (หน้าประวัติการจ่าย) */
+  undoPaymentLeg: async (legId, log) => {
+    const statement = await stmtApi.undoPaymentLeg(legId, log)
+    await get().refresh()
+    return statement
+  },
+
   // ทำเครื่องหมายว่ารายการในบิลจ่ายไปแล้ว — ไม่ตัดเงินซ้ำ แค่ผูกขาที่จ่ายไว้แล้ว
   // เข้ากับรายการ ใช้กับของที่จ่ายไปก่อนระบบจะจำได้ว่าเงินก้อนไหนของบรรทัดไหน
   assignStatementPayment: async (transactionId, log) => {

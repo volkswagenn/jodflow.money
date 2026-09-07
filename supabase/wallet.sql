@@ -276,7 +276,53 @@ begin
 end;
 $$;
 
--- ── ตรวจว่าฟังก์ชันครบ (ควรได้ 7 แถว) ───────────────────────────────────────
+-- ── ย้อนการจ่ายรายการค้างชำระ (ใช้จากหน้าประวัติการจ่าย) ──────────────────────
+-- ตรงข้ามกับ pay_pending_payment ทุกอย่าง: คืนเงินเข้ากระเป๋าที่ตัดไป ลบรายจ่ายที่
+-- สร้างไว้ รายการกลับเป็นค้างชำระ และรอบเดือนของรายการประจำที่ผูกอยู่กลับเป็นยังไม่จ่าย
+-- คืนเข้าเงินสดถ้าบัญชีที่เคยตัดถูกลบไปแล้ว (ดีกว่าย้อนไม่ได้เลย ผู้ใช้โอนต่อเองได้)
+create or replace function public.undo_pending_payment(
+  p_pending uuid,
+  p_log     jsonb default null
+) returns pending_payments language plpgsql security definer set search_path = public as $$
+declare v_p pending_payments; v_target text;
+begin
+  select * into v_p from pending_payments where id = p_pending;
+  if v_p.id is null then raise exception 'ไม่พบรายการค้างชำระนี้'; end if;
+  perform assert_can_edit(v_p.shop_id);
+  if v_p.status <> 'paid' then raise exception 'รายการนี้ยังไม่ได้จ่าย'; end if;
+  if v_p.paid_method is null then raise exception 'ไม่รู้ว่าจ่ายจากกระเป๋าไหน ย้อนให้ไม่ได้'; end if;
+
+  v_target := case
+    when v_p.paid_method = 'transfer' and v_p.transfer_account_id is not null
+         and exists (select 1 from transfer_accounts where id = v_p.transfer_account_id)
+      then 'transfer:' || v_p.transfer_account_id
+    else 'cash'
+  end;
+  perform apply_wallet_effect(v_p.shop_id, v_target, v_p.amount);
+
+  if v_p.transaction_id is not null then
+    delete from transactions where id = v_p.transaction_id;
+  end if;
+
+  update pending_payments
+     set status = 'pending', paid_at = null, paid_method = null,
+         transfer_account_id = null, transaction_id = null
+   where id = p_pending
+   returning * into v_p;
+
+  if v_p.recurring_entry_id is not null then
+    update recurring_entries
+       set status = 'pending', paid_at = null, paid_method = null,
+           transaction_id = null, transfer_account_id = null
+     where id = v_p.recurring_entry_id;
+  end if;
+
+  perform write_log(v_p.shop_id, p_log);
+  return v_p;
+end;
+$$;
+
+-- ── ตรวจว่าฟังก์ชันครบ (ควรได้ 8 แถว) ───────────────────────────────────────
 
 select routine_name
   from information_schema.routines
@@ -284,6 +330,6 @@ select routine_name
    and routine_name in (
      'move_cash_transfer', 'move_sub_wallet', 'move_between_sub_wallets',
      'borrow_from_sub_wallet', 'return_loan',
-     'pay_pending_payment', 'receive_pending_income'
+     'pay_pending_payment', 'receive_pending_income', 'undo_pending_payment'
    )
  order by routine_name;

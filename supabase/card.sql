@@ -1155,7 +1155,7 @@ select 'คอลัมน์ที่เติมเพิ่ม', count(*)::te
      or (table_name='recurring_entries' and column_name = 'card_id')
      or (table_name='shop_settings'     and column_name = 'card_min_rate'))
 union all
-select 'ฟังก์ชัน RPC ของบัตร', count(*)::text || ' / 18'
+select 'ฟังก์ชัน RPC ของบัตร', count(*)::text || ' / 19'
   from information_schema.routines
  where routine_schema = 'public'
    and routine_name in ('close_card_statement','pay_card_statement','undo_card_payment',
@@ -1164,7 +1164,7 @@ select 'ฟังก์ชัน RPC ของบัตร', count(*)::text || '
      'pay_installment_entry','undo_installment_entry','delete_card_installment','refund_source',
      'attach_installment_to_closed_statements',
      'attach_transaction_to_statement','detach_transaction_from_statement','apply_statement_delta',
-     'prepay_card_transaction','undo_card_prepayment')
+     'prepay_card_transaction','undo_card_prepayment', 'undo_card_payment_leg')
 union all
 select 'รับ method = card แล้ว',
        case when exists (
@@ -2296,3 +2296,64 @@ select 'ทำเครื่องหมายจ่ายแล้วโดย
                    where routine_schema = 'public'
                      and routine_name in ('assign_statement_payment','unassign_statement_payment')) = 2
             then '✅' else '❌ ยังไม่ครบ — รันไฟล์นี้ซ้ำอีกรอบ' end as "ผล";
+
+
+
+-- ###########################################################################
+-- ##  17. ย้อน/แก้ไขการจ่ายจากหน้าประวัติการจ่าย
+-- ###########################################################################
+--
+-- undo_card_payment ย้อน "ขาล่าสุด" ตามจำนวนเงิน เหมาะกับปุ่มย้อนในหน้าบัตร
+-- แต่หน้าประวัติการจ่ายชี้ไปที่ขาใดขาหนึ่งโดยตรง (จ่ายบิลใบเดียวหลายรอบ แล้วอยาก
+-- ย้อนรอบกลาง) ถ้าใช้ตัวเดิมจะไปย้อนขาที่ไม่ได้เลือก เงินคืนผิดกระเป๋า
+-- ตัวนี้ย้อนเฉพาะขาที่ระบุ: คืนเงินเข้ากระเป๋าที่ขานั้นตัดมาจริง หนี้บัตรกลับขึ้น
+-- ใบกลับเป็นยังไม่จ่าย/จ่ายบางส่วน และถ้าขานั้นเคยติ๊กว่า "จ่ายให้รายการไหน"
+-- ติ๊กนั้นหายไปพร้อมขา (ติ๊กคือ transaction_id บนขา ไม่ได้เก็บแยก)
+create or replace function public.undo_card_payment_leg(
+  p_leg uuid,
+  p_log jsonb default null
+) returns card_statements language plpgsql security definer set search_path = public as $$
+declare
+  v_leg card_statement_payments;
+  v_st  card_statements;
+begin
+  select * into v_leg from card_statement_payments where id = p_leg;
+  if not found then raise exception 'ไม่พบการจ่ายครั้งนี้ (อาจถูกย้อนไปแล้ว)'; end if;
+  perform assert_can_edit(v_leg.shop_id);
+  if v_leg.statement_id is null then
+    raise exception 'การจ่ายนี้เป็นการจ่ายก่อนออกบิล ต้องย้อนด้วย undo_card_prepayment';
+  end if;
+
+  select * into v_st from card_statements where id = v_leg.statement_id;
+  if v_st.carried_to is not null then
+    raise exception 'ใบนี้ถูกยกยอดไปรวมในบิลรอบถัดไปแล้ว ย้อนการจ่ายไม่ได้ — ให้ย้อนที่บิลใบล่าสุดแทน';
+  end if;
+
+  -- คืนเข้ากระเป๋าที่ตัดมาจริง (บัญชีที่ถูกลบไปแล้ว refund_source จะเลี่ยงไปเงินสด)
+  perform apply_wallet_effect(v_st.shop_id,
+    refund_source(v_st.shop_id, v_leg.method, v_leg.transfer_account_id), v_leg.amount);
+  perform apply_wallet_effect(v_st.shop_id, 'card:' || v_st.card_id, -v_leg.amount);
+
+  delete from card_statement_payments where id = p_leg;
+
+  update card_statements
+     set paid_amount = paid_amount - v_leg.amount,
+         status = case when amount <= 0 then 'paid'
+                       when paid_amount - v_leg.amount <= 0 then 'closed' else 'partial' end,
+         paid_at = case when paid_amount - v_leg.amount <= 0 then null else paid_at end,
+         paid_method = case when paid_amount - v_leg.amount <= 0 then null else paid_method end,
+         transfer_account_id = case when paid_amount - v_leg.amount <= 0 then null else transfer_account_id end
+   where id = v_st.id
+   returning * into v_st;
+
+  perform write_log(v_st.shop_id, p_log);
+  return v_st;
+end;
+$$;
+
+notify pgrst, 'reload schema';
+
+select 'ย้อนการจ่ายจากหน้าประวัติ (ส่วนที่ 17)' as "รายการ",
+       case when exists (select 1 from information_schema.routines
+                          where routine_schema = 'public' and routine_name = 'undo_card_payment_leg')
+            then '✅' else '❌ ยังไม่มี — รันไฟล์นี้ซ้ำอีกรอบ' end as "ผล";

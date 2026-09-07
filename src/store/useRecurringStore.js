@@ -163,6 +163,13 @@ const useRecurringStore = create((set, get) => ({
     return changed
   },
 
+  /** ย้อนการจ่ายรอบเดือน (หน้าประวัติการจ่าย) — คืนเงินตามรายจ่ายที่ผูก ลบรายจ่าย กลับเป็นยังไม่จ่าย */
+  undoEntryPayment: async (id, log = null) => {
+    const entry = await recurringApi.undoRecurringEntry(id, log)
+    set((s) => ({ entries: s.entries.map((e) => (e.id === id ? { ...e, ...entry } : e)) }))
+    return entry
+  },
+
   /** ย้อนสถานะเมื่อรายการที่ผูกไว้ถูกลบจากหน้าประวัติ */
   syncEntryFromTransaction: async (transactionId) => {
     const targets = get().entries.filter((e) => e.transactionId === transactionId)

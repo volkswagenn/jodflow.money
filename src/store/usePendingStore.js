@@ -113,6 +113,13 @@ const usePendingStore = create((set, get) => ({
     return item
   },
 
+  /** ย้อนการจ่าย (หน้าประวัติการจ่าย) — เงินคืน รายจ่ายหาย รายการกลับเป็นค้างชำระ */
+  undoPendingPayment: async (id, log = null) => {
+    const item = await pendingApi.undoPendingPayment(id, log)
+    set((s) => ({ pendingPayments: s.pendingPayments.map((p) => (p.id === id ? { ...p, ...item } : p)) }))
+    return item
+  },
+
   payPending: async (id, method, transactionId = null, transferAccountId = null) => {
     const item = await pendingApi.updatePendingPayment(id, {
       status: 'paid',
