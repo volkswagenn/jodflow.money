@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import useCreditCardStore from '../../store/useCreditCardStore'
 import useWalletStore from '../../store/useWalletStore'
 import useTransactionStore from '../../store/useTransactionStore'
@@ -210,6 +210,7 @@ function EntryPips({ rows, currentSeq: currentSeqProp = null, closingDay = null,
  * ขวา: ข้อมูลบัตร · ผ่อนผ่านบัตรใบนี้ · บิลที่จ่ายแล้ว
  */
 export default function CardDetailView({ cardId }) {
+  const navigate = useNavigate()
   const card = useCreditCardStore((s) => s.getCard(cardId))
   const statements = useCreditCardStore((s) => s.getStatements(cardId))
   const current = useCreditCardStore((s) => s.getCurrentCycle(cardId))
@@ -955,24 +956,217 @@ export default function CardDetailView({ cardId }) {
           </p>
         )}
 
-        <div className="card px-4 py-3.5 flex items-center gap-3">
-          <span className="w-10 h-10 flex-none rounded-lg bg-paper flex items-center justify-center">
-            <AppIcon value={card.icon} size={22} fallback={DEFAULT_ICONS.card} />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block text-[14.5px] font-semibold truncate">{formatCard(card)}</span>
-            <span className="block text-[11.5px] text-faint truncate">
-              {card.bankName} · สรุปยอดทุกวันที่ {card.closingDay} · ครบกำหนดวันที่ {card.dueDay}
+        {/* ── หัวบัตร + สามคอลัมน์สรุป (ตามแบบ) ────────────────────────────────
+            บิลที่ต้องจ่าย · รอบที่กำลังสะสม · ยอดหนี้กับวงเงิน คือสามคำถามที่คนเปิด
+            หน้าบัตรมาถามพร้อมกันเสมอ ("ต้องจ่ายเท่าไร · ก่อหนี้ไปอีกเท่าไรแล้ว ·
+            เหลือวงเงินไหม") ของเดิมวางเรียงลงมาเป็นสามกล่อง ต้องเลื่อนจอถึงจะครบ
+            ทั้งที่ทั้งสามอันสั้นมาก จอกว้างจึงวางเรียงกันในกล่องเดียว จอแคบค่อยเรียงลงมา */}
+        <div className="card overflow-hidden">
+          <div className="flex items-center gap-3 px-4 py-3 border-b border-[#EFEDE7] flex-wrap">
+            <span className="w-10 h-10 flex-none rounded-[11px] bg-paper flex items-center justify-center">
+              <AppIcon value={card.icon} size={22} fallback={DEFAULT_ICONS.card} />
             </span>
-          </span>
-          <span className="text-right flex-none">
-            <span className="block text-[11px] text-faint">{credit > 0 ? 'เครดิตคงเหลือ' : 'ยอดหนี้รวม'}</span>
-            <span className={`tabular-nums block text-[19px] font-bold ${
-              debt > 0 ? 'text-expense' : credit > 0 ? 'text-income' : 'text-muted'
-            }`}>
-              {fmt(Math.abs(debt))}
+            {/* min-w กันชื่อบัตรถูกปุ่มบีบจนเหลือ "บัตรก…" บนจอแคบ — ปุ่มตกบรรทัดใหม่ได้
+                แต่ชื่อบัตรที่อ่านไม่ออกทำให้ไม่รู้ว่ากำลังดูใบไหนอยู่ */}
+            <span className="min-w-[168px] flex-1">
+              <span className="block text-[14.5px] font-semibold truncate">{formatCard(card)}</span>
+              <span className="block text-[11.5px] text-faint truncate">
+                {card.bankName} · สรุปยอดทุกวันที่ {card.closingDay} · ครบกำหนดวันที่ {card.dueDay}
+              </span>
             </span>
-          </span>
+            <button
+              className="flex-none h-8 px-3 rounded-[9px] border border-hairline bg-white text-xs flex items-center gap-1.5 hover:bg-paper"
+              onClick={() => setAdvanceTarget(card)}
+            >
+              <Icon name="payments" size={15} className="text-muted" />กดเงินสด
+            </button>
+            <button
+              className="flex-none h-8 px-3 rounded-[9px] border border-hairline bg-white text-xs hover:bg-paper"
+              onClick={() => setCashbackTarget({ estimate: estCashback })}
+            >
+              บันทึกเงินคืน
+            </button>
+            {/* งานที่ทำบ่อยที่สุดของหน้านี้ จึงเป็นปุ่มทึบและอยู่ก่อนเมนูสามจุด */}
+            <button
+              className="flex-none h-8 px-3 rounded-[9px] bg-ink text-white text-xs font-semibold flex items-center gap-1.5 hover:bg-black"
+              onClick={() => setChargeOpen(true)}
+            >
+              <Icon name="add" size={15} />
+              เพิ่มรายการรูดบัตร
+            </button>
+            <RowMenu
+              compact
+              title={formatCard(card)}
+              sub={`${card.bankName} · สรุปยอดทุกวันที่ ${card.closingDay} · ครบกำหนดวันที่ ${card.dueDay}`}
+              icon="credit_card"
+              items={[
+                ...(hasFee && !feeDue ? [{
+                  icon: 'payments', label: 'บันทึกค่าธรรมเนียมรายปี',
+                  desc: 'ลงเป็นรายจ่ายบนบัตรใบนี้ และเข้าบิลรอบที่วันที่นั้นตกอยู่',
+                  onClick: () => setFeeTarget(card),
+                }] : []),
+                ...(paidHistory.length > 0 ? [{
+                  icon: 'history',
+                  label: showPaid ? 'ซ่อนบิลที่จ่ายแล้ว' : `ดูบิลที่จ่ายแล้ว ${paidHistory.length} รอบ`,
+                  desc: 'ย้อนดูใบที่ปิดยอดไปแล้วของบัตรใบนี้',
+                  onClick: () => setShowPaid((v) => !v),
+                }] : []),
+                {
+                  icon: 'tune', label: 'แก้ไขบัตรนี้',
+                  desc: 'ชื่อ วันสรุปยอด วันครบกำหนด วงเงิน เงินคืน',
+                  onClick: () => navigate('/manage/cards'),
+                },
+              ]}
+            />
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)_minmax(0,1fr)]">
+            {/* คอลัมน์ 1 — บิลที่ปิดรอบแล้วและต้องจ่าย */}
+            <div className={`px-4 py-3.5 flex flex-col gap-2.5 min-w-0 ${bill ? 'bg-expense-soft' : ''}`}>
+              {bill ? (
+                <>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[11.5px] font-semibold text-[#A93A2E]">ยอดที่ต้องชำระ</span>
+                    {unpaid.length > 1 && (
+                      <span className="tabular-nums flex-none text-[11px] font-bold bg-white border border-[#F0C4BE] text-[#A93A2E] rounded-full px-2">
+                        ค้างอีก {unpaid.length - 1} รอบ
+                      </span>
+                    )}
+                  </div>
+                  <div>
+                    <div className="tabular-nums text-[34px] font-semibold tracking-[-0.03em] text-[#C03A2D] leading-[1.05]">
+                      {fmt(billLeft)}
+                    </div>
+                    <div className="text-[11.5px] text-[#7A5B56] mt-[3px] leading-[1.45]">
+                      ครบกำหนด {formatIsoThai(bill.dueDate)} · {billAlert}
+                    </div>
+                    <div className="text-[11px] text-[#8A7A76] mt-0.5 leading-[1.45]">
+                      ขั้นต่ำ {fmt(bill.minimumAmount)}
+                      {Number(bill.paidAmount) > 0 && ` · จ่ายไปแล้ว ${fmt(bill.paidAmount)}`}
+                      {Number(bill.previousBalance) > 0 && ` · ยกมา ${fmt(bill.previousBalance)}`}
+                      {Number(bill.previousBalance) < 0 && ` · หักเครดิต ${fmt(-bill.previousBalance)}`}
+                    </div>
+                    {/* บิลใบเดียวมีของสองแบบปนกัน — รูดเต็มจำนวนกับค่างวดผ่อน — ต้องแยกให้เห็น
+                        ไม่งั้นคนที่รู้ว่าเดือนนี้ไม่ได้รูดอะไรเลยจะงงว่ายอดมาจากไหน */}
+                    {billBreakdown && (
+                      <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-[#8A7A76] mt-1">
+                        {billBreakdown.full > 0 && <span>รูดเต็มจำนวน <b className="tabular-nums">{fmt(billBreakdown.full)}</b></span>}
+                        {billBreakdown.installment > 0 && (
+                          <span>ค่างวดผ่อน {billBreakdown.installmentCount} งวด <b className="tabular-nums">{fmt(billBreakdown.installment)}</b></span>
+                        )}
+                        {billBreakdown.advance > 0 && <span>กดเงินสด <b className="tabular-nums">{fmt(billBreakdown.advance)}</b></span>}
+                        {billBreakdown.credit > 0 && <span>เงินคืน <b className="tabular-nums">−{fmt(billBreakdown.credit)}</b></span>}
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    className="h-10 rounded-[11px] bg-ink text-white text-[13.5px] font-semibold flex items-center justify-center gap-1.5 hover:bg-black"
+                    onClick={() => setPayTarget(bill)}
+                  >
+                    <Icon name="credit_card" size={18} />
+                    จ่ายบิล
+                  </button>
+                  <span className="text-[11px] text-[#8A6A15] leading-[1.45]">
+                    ปิดรอบแล้ว ยอดนิ่ง · จ่ายขั้นต่ำได้ แต่ระยะปลอดดอกเบี้ยจะหายไป
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="text-[11.5px] font-semibold text-muted">ยอดที่ต้องชำระ</span>
+                  <div>
+                    <div className="tabular-nums text-[34px] font-semibold tracking-[-0.03em] text-[#3F444C] leading-[1.05]">
+                      {fmt(0)}
+                    </div>
+                    <div className="text-[11.5px] text-faint mt-[3px] leading-[1.45]">
+                      ไม่มีบิลที่ต้องจ่าย
+                      {current ? ` — รอบที่กำลังสะสมจะครบกำหนด ${formatThaiDate(current.due)}` : ''}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* คอลัมน์ 2 — รอบที่ยังไม่ปิด */}
+            <div className="px-4 py-3.5 flex flex-col gap-2.5 min-w-0 border-t lg:border-t-0 lg:border-l border-[#EFEDE7]">
+              <span className="text-[11.5px] font-semibold text-muted">รอบถัดไปสะสมแล้ว</span>
+              {current ? (
+                <>
+                  <div>
+                    <div className="tabular-nums text-[22px] font-semibold text-[#3F444C] tracking-[-0.02em] leading-[1.1]">
+                      {fmt(current.net)}
+                    </div>
+                    <div className="text-[11.5px] text-faint mt-[3px] leading-[1.45]">
+                      ครบกำหนด {formatThaiDate(current.due)}
+                      {daysToClosing >= 0 && ` · สรุปยอดอีก ${daysToClosing} วัน`}
+                    </div>
+                    <div className="text-[11px] text-[#A5A199] mt-0.5 leading-[1.45]">
+                      {current.count} รายการ
+                      {current.spend > 0 && ` · รูดเต็มจำนวน ${fmt(current.spend)}`}
+                      {current.installmentCount > 0 && ` · ค่างวดผ่อน ${current.installmentCount} งวด ${fmt(current.installment)}`}
+                      {current.advance > 0 && ` · กดเงินสด ${fmt(current.advance)}`}
+                      {current.credit > 0 && ` · เงินคืน −${fmt(current.credit)}`}
+                      {current.prepaid > 0 && ` · จ่ายล่วงหน้าแล้ว −${fmt(current.prepaid)}`}
+                    </div>
+                  </div>
+                  {estCashback > 0 && (
+                    <div className="text-[11px] text-income leading-[1.45]">
+                      เงินคืนโดยประมาณ <span className="tabular-nums">≈ {fmt(estCashback)}</span>
+                    </div>
+                  )}
+                  {unbilledAdvances.map((a) => (
+                    <div key={a.id} className="flex items-center gap-2 border-t border-[#F2F0EA] pt-2 text-[11px]">
+                      <span className="flex-1 min-w-0 text-muted leading-[1.4]">
+                        กดเงินสด {formatIsoThai(a.date)}
+                        {Number(a.fee) > 0 && ` · ค่าธรรมเนียม ${fmt(a.fee)}`}
+                      </span>
+                      <span className="tabular-nums flex-none text-[#3F444C]">{fmt(a.amount)}</span>
+                      <button className="flex-none text-faint hover:text-expense" onClick={() => setUndoAdvanceTarget(a)}>
+                        ย้อน
+                      </button>
+                    </div>
+                  ))}
+                </>
+              ) : (
+                <div className="text-[11.5px] text-faint">ยังไม่มีรอบที่กำลังสะสม</div>
+              )}
+            </div>
+
+            {/* คอลัมน์ 3 — ยอดหนี้รวมกับวงเงิน */}
+            <div className="px-4 py-3.5 flex flex-col gap-2.5 min-w-0 border-t lg:border-t-0 lg:border-l border-[#EFEDE7]">
+              <span className="text-[11.5px] font-semibold text-muted">
+                {credit > 0 ? 'เครดิตคงเหลือ' : 'ยอดหนี้รวม'}
+              </span>
+              <div>
+                <div className={`tabular-nums text-[22px] font-semibold tracking-[-0.02em] leading-[1.1] ${
+                  debt > 0 ? 'text-expense' : credit > 0 ? 'text-income' : 'text-muted'
+                }`}>
+                  {fmt(Math.abs(debt))}
+                </div>
+                {usage?.unbilled > 0 && (
+                  <div className="text-[11px] text-[#A5A199] mt-[3px] leading-[1.45]">
+                    รวมยอดผ่อนที่ยังไม่ถูกเรียกเก็บ {fmt(usage.unbilled)} ซึ่งธนาคารกันวงเงินไว้แล้ว
+                  </div>
+                )}
+              </div>
+              {limit > 0 && (
+                <div>
+                  <div className="h-1.5 bg-[#EFEDE7] rounded-[3px] overflow-hidden">
+                    <div className={`h-full rounded-[3px] ${overLimit ? 'bg-expense' : 'bg-[#E48A80]'}`} style={{ width: `${pct}%` }} />
+                  </div>
+                  <div className="flex justify-between gap-1.5 text-[11px] text-muted mt-1.5">
+                    <span>ใช้ไป <b className="tabular-nums text-ink">{fmt(used)}</b></span>
+                    <span>
+                      {overLimit ? 'เกินวงเงิน' : 'เหลือ'}{' '}
+                      <b className={`tabular-nums ${overLimit ? 'text-expense' : 'text-income'}`}>{fmt(Math.abs(limit - used))}</b>
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-faint mt-[3px]">
+                    วงเงิน <b className="tabular-nums text-ink">{fmt(limit)}</b>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
         {credit > 0 && (
@@ -1024,146 +1218,6 @@ export default function CardDetailView({ cardId }) {
             </button>
           </div>
         )}
-
-        {bill && (
-          <div className="bg-expense-soft border border-[#F0C4BE] rounded-panel px-4 py-3.5">
-            <div className="flex items-start justify-between gap-5 flex-wrap">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-[11.5px] font-semibold text-[#A93A2E]">
-                    ยอดที่ต้องชำระ · ครบกำหนด {formatIsoThai(bill.dueDate)} · {billAlert}
-                  </span>
-                  {unpaid.length > 1 && (
-                    <span className="tabular-nums flex-none text-[11px] font-bold bg-white border border-[#F0C4BE] text-[#A93A2E] rounded-full px-2">
-                      ค้างอีก {unpaid.length - 1} รอบ
-                    </span>
-                  )}
-                </div>
-                <div className="tabular-nums text-[34px] font-semibold tracking-[-0.03em] text-[#C03A2D] leading-[1.15] mt-0.5">
-                  {fmt(billLeft)}
-                </div>
-                <div className="text-[11.5px] text-[#7A5B56] mt-0.5">
-                  ขั้นต่ำ {fmt(bill.minimumAmount)}
-                  {Number(bill.paidAmount) > 0 && ` · จ่ายไปแล้ว ${fmt(bill.paidAmount)}`}
-                  {Number(bill.previousBalance) > 0 && ` · ยกมา ${fmt(bill.previousBalance)}`}
-                  {Number(bill.previousBalance) < 0 && ` · หักเครดิต ${fmt(-bill.previousBalance)}`}
-                </div>
-                {/* บิลใบเดียวมีของสองแบบปนกัน — รูดเต็มจำนวนกับค่างวดผ่อน — ต้องแยกให้เห็น
-                    ไม่งั้นคนที่รู้ว่าเดือนนี้ไม่ได้รูดอะไรเลยจะงงว่ายอดมาจากไหน */}
-                {billBreakdown && (
-                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-[#7A5B56] mt-1">
-                    {billBreakdown.full > 0 && <span>รูดเต็มจำนวน <b className="tabular-nums">{fmt(billBreakdown.full)}</b></span>}
-                    {billBreakdown.installment > 0 && (
-                      <span>ค่างวดผ่อน {billBreakdown.installmentCount} งวด <b className="tabular-nums">{fmt(billBreakdown.installment)}</b></span>
-                    )}
-                    {billBreakdown.advance > 0 && <span>กดเงินสด <b className="tabular-nums">{fmt(billBreakdown.advance)}</b></span>}
-                    {billBreakdown.credit > 0 && <span>เงินคืน <b className="tabular-nums">−{fmt(billBreakdown.credit)}</b></span>}
-                  </div>
-                )}
-              </div>
-              <div className="flex flex-col gap-1.5 w-[196px] flex-none">
-                <button
-                  className="h-10 rounded-[11px] bg-ink text-white text-[13.5px] font-semibold flex items-center justify-center gap-1.5 hover:bg-black"
-                  onClick={() => setPayTarget(bill)}
-                >
-                  <Icon name="credit_card" size={18} />
-                  จ่ายบิล
-                </button>
-                <span className="text-[11px] text-[#8A6A15] text-center leading-snug">
-                  ปิดรอบแล้ว ยอดนิ่ง · จ่ายขั้นต่ำได้ แต่ระยะปลอดดอกเบี้ยจะหายไป
-                </span>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {current && (
-          <div className="bg-[#FAF9F6] border border-[#EFEDE7] rounded-panel px-4 py-3">
-            <div className="flex items-start gap-3.5 flex-wrap">
-              <div className="min-w-0 flex-1">
-                <div className="text-[11.5px] text-faint">
-                  รอบถัดไปสะสมแล้ว · ครบกำหนด {formatThaiDate(current.due)}
-                  {daysToClosing >= 0 && ` · สรุปยอดอีก ${daysToClosing} วัน`}
-                </div>
-                <div className="tabular-nums text-base font-semibold text-[#3F444C] mt-0.5">
-                  {fmt(current.net)}
-                  <span className="text-[11.5px] font-normal text-faint ml-2">
-                    {current.count} รายการ
-                    {current.spend > 0 && ` · รูดเต็มจำนวน ${fmt(current.spend)}`}
-                    {current.installmentCount > 0 &&
-                      ` · ค่างวดผ่อน ${current.installmentCount} งวด ${fmt(current.installment)}`}
-                    {current.advance > 0 && ` · กดเงินสด ${fmt(current.advance)}`}
-                    {current.credit > 0 && ` · เงินคืน −${fmt(current.credit)}`}
-                    {current.prepaid > 0 && ` · จ่ายล่วงหน้าแล้ว −${fmt(current.prepaid)}`}
-                  </span>
-                </div>
-              </div>
-              {estCashback > 0 && (
-                <div className="flex-none text-right text-[11px] text-income leading-snug">
-                  เงินคืนโดยประมาณ<br /><span className="tabular-nums">≈ {fmt(estCashback)}</span>
-                </div>
-              )}
-            </div>
-
-            {unbilledAdvances.map((a) => (
-              <div key={a.id} className="flex items-center gap-2.5 border-t border-hairline mt-2 pt-2 text-[11.5px]">
-                <span className="flex-1 min-w-0 text-muted truncate">
-                  กดเงินสด {formatIsoThai(a.date)}
-                  {Number(a.fee) > 0 && ` · ค่าธรรมเนียม ${fmt(a.fee)}`}
-                </span>
-                <span className="tabular-nums flex-none text-[#3F444C]">{fmt(a.amount)}</span>
-                <button className="flex-none text-faint text-[11.5px] hover:text-expense" onClick={() => setUndoAdvanceTarget(a)}>
-                  ย้อน
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {limit > 0 && (
-          <div>
-            <div className="flex justify-between text-xs text-muted flex-wrap gap-2">
-              <span>ใช้ไป <b className="tabular-nums text-ink">{fmt(used)}</b></span>
-              <span>{overLimit ? 'เกินวงเงิน' : 'เหลือ'} <b className={`tabular-nums ${overLimit ? 'text-expense' : 'text-income'}`}>{fmt(Math.abs(limit - used))}</b></span>
-              <span>วงเงิน <b className="tabular-nums text-ink">{fmt(limit)}</b></span>
-            </div>
-            <div className="h-1.5 bg-[#EFEDE7] rounded-[3px] mt-1.5 overflow-hidden">
-              <div className={`h-full rounded-[3px] ${overLimit ? 'bg-expense' : 'bg-[#E48A80]'}`} style={{ width: `${pct}%` }} />
-            </div>
-            {usage?.unbilled > 0 && (
-              <div className="text-[11px] text-faint mt-1.5">
-                รวมยอดผ่อนที่ยังไม่ถูกเรียกเก็บ {fmt(usage.unbilled)} ซึ่งธนาคารกันวงเงินไว้แล้ว
-              </div>
-            )}
-          </div>
-        )}
-
-        <div className="flex items-center gap-1.5 flex-wrap">
-          {paidHistory.length > 0 && (
-            <button className="mr-auto text-xs text-faint hover:text-ink" onClick={() => setShowPaid((v) => !v)}>
-              {showPaid ? '▲ ซ่อนบิลที่จ่ายแล้ว' : `▼ บิลที่จ่ายแล้ว ${paidHistory.length} รอบ`}
-            </button>
-          )}
-          <button className="h-8 px-3 rounded-[9px] border border-hairline bg-white text-xs flex items-center gap-1.5 hover:bg-paper" onClick={() => setAdvanceTarget(card)}>
-            <Icon name="payments" size={15} className="text-muted" />กดเงินสด
-          </button>
-          {hasFee && !feeDue && (
-            <button className="h-8 px-3 rounded-[9px] border border-hairline bg-white text-xs hover:bg-paper" onClick={() => setFeeTarget(card)}>
-              ค่าธรรมเนียมรายปี
-            </button>
-          )}
-          <button className="h-8 px-3 rounded-[9px] border border-hairline bg-white text-xs hover:bg-paper" onClick={() => setCashbackTarget({ estimate: estCashback })}>
-            บันทึกเงินคืน
-          </button>
-          {/* งานที่ทำบ่อยที่สุดในแถวนี้ จึงอยู่ขวาสุดและเป็นปุ่มทึบ — ตำแหน่งที่ตาไปหยุดหลังสุด */}
-          <button
-            className="h-8 px-3 rounded-[9px] bg-ink text-white text-xs font-semibold flex items-center gap-1.5 hover:bg-black"
-            onClick={() => setChargeOpen(true)}
-          >
-            <Icon name="add" size={15} />
-            เพิ่มรายการรูดบัตร
-          </button>
-        </div>
 
         <div className="card flex flex-col overflow-hidden">
           {/* สองแท็บ = สองบิล รายการอยู่แท็บไหนถูกเรียกเก็บในบิลนั้น
