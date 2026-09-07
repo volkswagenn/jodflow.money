@@ -17,6 +17,11 @@ import Icon from './Icon'
  * fixed ซึ่งจะยึดกับกล่องที่มี transform แทนที่จะยึดกับหน้าจอ ผลคือกล่องไปโผล่
  * ในกรอบเล็กๆ นั้นจนกดอะไรไม่ได้ ถ้าต้องการปุ่มเล็กลงให้ใช้ compact
  *
+ * หน้าตาข้างในเป็นตารางสี่เหลี่ยมจัตุรัสชุดเดียวกับเมนูของกระเป๋าเงิน
+ * ของเดิมเป็นรายการแนวตั้งพร้อมคำอธิบายยาวหนึ่งบรรทัดต่อปุ่ม ซึ่งต้องอ่านทีละบรรทัด
+ * จึงจะรู้ว่ามีอะไรให้ทำบ้าง ตารางไอคอนกวาดตารอบเดียวเห็นครบและกดถูกตัวเร็วกว่า
+ * — คำอธิบายจึงต้องสั้น (ไม่กี่คำ) ถ้ายาวกว่านั้นแปลว่าปุ่มนั้นตั้งชื่อยังไม่ดีพอ
+ *
  * @param items [{ icon, label, desc, onClick, danger }]
  */
 export default function RowMenu({
@@ -38,25 +43,29 @@ export default function RowMenu({
       </button>
 
       {open && (
-        <Popup title={title} sub={sub} icon={icon} width={380} onClose={() => setOpen(false)}>
-          <div className="flex flex-col gap-1.5">
+        <Popup title={title} sub={sub} icon={icon} width={440} onClose={() => setOpen(false)}>
+          <div className="grid grid-cols-3 gap-2">
             {items.map((it) => (
               <button
                 key={it.label}
                 type="button"
+                title={it.desc ? `${it.label} — ${it.desc}` : it.label}
                 onClick={() => { setOpen(false); it.onClick?.() }}
-                className={`h-12 px-3.5 rounded-ctl border flex items-center gap-2.5 text-left transition ${
+                className={`aspect-square border rounded-[12px] bg-white flex flex-col items-center justify-center gap-[5px] p-2 text-center overflow-hidden transition ${
                   it.danger
-                    ? 'border-[#F0C4BE] bg-expense-soft/40 hover:border-expense'
-                    : 'border-hairline bg-white hover:bg-paper hover:border-ink'
+                    ? 'border-hairline hover:bg-expense-soft hover:border-expense'
+                    : 'border-hairline hover:bg-[#F2FAD9] hover:border-ink'
                 }`}
               >
-                <Icon name={it.icon} size={19} className={it.danger ? 'text-expense' : 'text-ink'} />
-                <span className="flex-1 min-w-0">
-                  <span className={`block text-[13px] font-semibold ${it.danger ? 'text-expense' : ''}`}>{it.label}</span>
-                  {it.desc && <span className="block text-[11px] text-faint truncate">{it.desc}</span>}
+                <span className={`w-[34px] h-[34px] flex-none rounded-[10px] flex items-center justify-center ${
+                  it.danger ? 'bg-expense-soft' : 'bg-[#F4F3EF]'
+                }`}>
+                  <Icon name={it.icon} size={19} className={it.danger ? 'text-expense' : 'text-[#5C6068]'} />
                 </span>
-                <Icon name="chevron_right" size={18} className="text-faint" />
+                <span className={`text-[12px] font-semibold leading-tight ${it.danger ? 'text-expense' : ''}`}>
+                  {it.label}
+                </span>
+                {it.desc && <span className="text-[10.5px] text-faint leading-[1.3]">{it.desc}</span>}
               </button>
             ))}
           </div>

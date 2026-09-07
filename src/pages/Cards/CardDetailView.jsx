@@ -699,41 +699,41 @@ export default function CardDetailView({ cardId }) {
         // ด้วยยอดเฉพาะรายการ (บิลรับยอดบางส่วนอยู่แล้ว ไม่ต้องมีทางพิเศษ)
         ...(inIssuedBill && r.prepayable && bill && !paidHere ? [{
           icon: 'payments',
-          label: `จ่ายบิลเฉพาะยอดนี้ ${fmt(paidHereLeft)}`,
-          desc: 'เปิดหน้าจ่ายบิลโดยใส่ยอดของรายการนี้ให้ ส่วนที่เหลือของบิลยังค้างอยู่',
+          label: 'จ่ายบิลยอดนี้',
+          desc: `${fmt(paidHereLeft)} บาท`,
           onClick: () => openPayItemInBill(r),
         }] : []),
         // จ่ายไปแล้วจริงแต่ระบบไม่รู้ว่าเงินก้อนไหนเป็นของบรรทัดไหน (จ่ายก่อนมีระบบนี้)
         // ให้ติ๊กเองได้ โดยผูกกับยอดที่จ่ายบิลไว้แล้ว ไม่ตัดเงินเพิ่มแม้แต่บาทเดียว
         ...(inIssuedBill && r.prepayable && bill && !paidHere && unassignedPaid >= paidHereLeft - 0.005 ? [{
           icon: 'check_circle',
-          label: 'ทำเครื่องหมายว่าจ่ายแล้ว',
-          desc: `ยอดนี้ถูกตัดไปแล้วตอนจ่ายบิล (บิลใบนี้มียอดที่ยังไม่ระบุว่าเป็นของบรรทัดไหน ${fmt(unassignedPaid)}) — ไม่ตัดเงินเพิ่ม`,
+          label: 'ติ๊กว่าจ่ายแล้ว',
+          desc: 'ไม่ตัดเงินเพิ่ม',
           onClick: () => markRowPaid(r),
         }] : []),
         ...(inIssuedBill && r.paidInBill && !r.paidInBill.whole ? [{
           icon: 'undo',
-          label: 'เอาเครื่องหมายจ่ายแล้วออก',
-          desc: 'ยอดที่จ่ายกลับไปเป็นยอดจ่ายรวมของบิล เงินไม่ขยับ',
+          label: 'เอาติ๊กออก',
+          desc: 'เงินไม่ขยับ',
           onClick: () => unmarkRowPaid(r),
         }] : []),
         ...(!inIssuedBill && r.prepayable && prepaidLeft > 0.005 ? [{
           icon: 'payments',
-          label: r.prepaid ? `จ่ายส่วนที่เหลือ ${fmt(prepaidLeft)}` : 'จ่ายรายการนี้ก่อนออกบิล',
-          desc: 'โอนจ่ายเฉพาะยอดนี้ตอนนี้ ยอดจะถูกหักออกจากบิลรอบที่กำลังมาถึง',
+          label: r.prepaid ? 'จ่ายส่วนที่เหลือ' : 'จ่ายรายการนี้',
+          desc: `${fmt(prepaidLeft)} · ไม่รอบิล`,
           onClick: () => openPrepay(r),
         }] : []),
         ...(r.prepaid ? [{
           icon: 'undo',
-          label: `ย้อนการจ่าย ${fmt(r.prepaid.amount)} ของรายการนี้`,
-          desc: 'คืนเงินเข้ากระเป๋าที่ตัดไป และยอดกลับเข้าบิลรอบที่กำลังมาถึง',
+          label: 'ย้อนการจ่าย',
+          desc: `คืน ${fmt(r.prepaid.amount)}`,
           danger: true,
           onClick: () => setUndoPrepayTarget(r),
         }] : []),
         {
           icon: 'edit_note',
           label: 'แก้ไขรายการ',
-          desc: 'แก้ยอด วันที่ หมวดหมู่ หรือย้ายไปช่องทางอื่น',
+          desc: 'ยอด วันที่ หมวดหมู่',
           onClick: () => setEditingTx(r.tx),
         },
         // ย้ายรอบบิล — งวดผ่อนย้ายไม่ได้ (ตารางงวดกำหนดเอง) · ที่ผูกใบอยู่ย้ายกลับได้
@@ -741,19 +741,19 @@ export default function CardDetailView({ cardId }) {
           : r.tx.cardStatementId ? [{
             icon: 'undo',
             label: 'ย้ายไปรอบบิลหน้า',
-            desc: 'เอาออกจากบิลที่ออกแล้ว ไปรวมกับบิลรอบถัดไปตามวันที่รูด',
+            desc: 'ออกจากบิลใบนี้',
             onClick: () => run(() => moveToNext(r)),
           }]
           : unpaid.map((s) => ({
             icon: 'receipt_long',
-            label: `ย้ายไปรอบบิลนี้ (ครบกำหนด ${formatIsoThai(s.dueDate)})`,
-            desc: `ปิดรอบ ${formatIsoThai(s.periodEnd)} · ยอดบิลจะเพิ่มเป็น ${fmt(Number(s.amount) - Number(s.paidAmount) + Math.abs(r.amount))}`,
+            label: 'ย้ายไปรอบบิลนี้',
+            desc: `ครบกำหนด ${formatIsoThai(s.dueDate)}`,
             onClick: () => run(() => moveToBill(r, s)),
           }))),
         {
           icon: 'delete',
           label: 'ลบรายการนี้',
-          desc: 'คืนยอดกลับให้บัตร และลบรายการออกจากประวัติ',
+          desc: 'คืนยอดให้บัตร',
           danger: true,
           onClick: () => setCancelTxTarget(r.tx),
         },
@@ -764,7 +764,7 @@ export default function CardDetailView({ cardId }) {
         {
           icon: 'undo',
           label: 'ย้อนการกดเงินสด',
-          desc: 'คืนเงินออกจากกระเป๋าปลายทางและลดหนี้บัตรกลับ',
+          desc: 'คืนเงิน ลดหนี้บัตร',
           danger: true,
           onClick: () => setUndoAdvanceTarget(r.advance),
         },
@@ -776,19 +776,19 @@ export default function CardDetailView({ cardId }) {
         next && {
           icon: 'payments',
           label: `จ่ายค่างวดที่ ${next.seq}`,
-          desc: 'ตัดเงินจากเงินสด/บัญชี โดยไม่รอบิลบัตร',
+          desc: 'ไม่รอบิลบัตร',
           onClick: () => setPayEntryTarget({ installment: ins, entry: next }),
         },
         {
           icon: 'edit_note',
           label: 'แก้ไขรายการผ่อน',
-          desc: 'แก้ยอด จำนวนงวด วันที่ หรือบัตรที่ใช้ผ่อน',
+          desc: 'ยอด งวด บัตร',
           onClick: () => setInsForm({ installment: ins }),
         },
         {
           icon: 'delete',
           label: 'ลบรายการผ่อนทิ้ง',
-          desc: 'ใช้เมื่อบันทึกผิด — คืนเงินงวดที่จ่ายไปแล้วให้ด้วย',
+          desc: 'คืนเงินงวดที่จ่ายแล้ว',
           danger: true,
           onClick: () => setInsDeleteTarget({
             installment: ins, progress: getInstallmentProgress(ins.id), mode: 'delete',
@@ -796,7 +796,7 @@ export default function CardDetailView({ cardId }) {
         },
       ].filter(Boolean)
     }
-    return [{ icon: 'info', label: 'รายการนี้จัดการที่อื่น', desc: 'ดูรายละเอียดได้ที่หน้าประวัติทั้งหมด', onClick: () => {} }]
+    return [{ icon: 'info', label: 'จัดการที่อื่น', desc: 'ดูที่หน้าประวัติ', onClick: () => {} }]
   }
 
   // ── จ่ายเฉพาะรายการเดียว ────────────────────────────────────────────────
@@ -1001,19 +1001,19 @@ export default function CardDetailView({ cardId }) {
               icon="credit_card"
               items={[
                 ...(hasFee && !feeDue ? [{
-                  icon: 'payments', label: 'บันทึกค่าธรรมเนียมรายปี',
-                  desc: 'ลงเป็นรายจ่ายบนบัตรใบนี้ และเข้าบิลรอบที่วันที่นั้นตกอยู่',
+                  icon: 'payments', label: 'ค่าธรรมเนียมรายปี',
+                  desc: 'ลงเป็นรายจ่าย',
                   onClick: () => setFeeTarget(card),
                 }] : []),
                 ...(paidHistory.length > 0 ? [{
                   icon: 'history',
-                  label: showPaid ? 'ซ่อนบิลที่จ่ายแล้ว' : `ดูบิลที่จ่ายแล้ว ${paidHistory.length} รอบ`,
-                  desc: 'ย้อนดูใบที่ปิดยอดไปแล้วของบัตรใบนี้',
+                  label: showPaid ? 'ซ่อนบิลที่จ่ายแล้ว' : 'บิลที่จ่ายแล้ว',
+                  desc: `${paidHistory.length} รอบ`,
                   onClick: () => setShowPaid((v) => !v),
                 }] : []),
                 {
                   icon: 'tune', label: 'แก้ไขบัตรนี้',
-                  desc: 'ชื่อ วันสรุปยอด วันครบกำหนด วงเงิน เงินคืน',
+                  desc: 'ชื่อ รอบบิล วงเงิน',
                   onClick: () => navigate('/manage/cards'),
                 },
               ]}
@@ -1580,13 +1580,13 @@ export default function CardDetailView({ cardId }) {
                         {
                           icon: 'cancel',
                           label: 'ยกเลิกสัญญา',
-                          desc: 'หยุดงวดที่เหลือ เก็บงวดที่เกิดไปแล้วไว้เป็นประวัติ',
+                          desc: 'หยุดงวดที่เหลือ',
                           onClick: () => setInsDeleteTarget({ installment: i, progress: p, mode: 'cancel' }),
                         },
                         {
                           icon: 'delete',
                           label: 'ลบทิ้งทั้งรายการ',
-                          desc: 'ใช้เมื่อบันทึกผิด — คืนเงินงวดที่จ่ายไปแล้วให้ด้วย',
+                          desc: 'คืนเงินงวดที่จ่ายแล้ว',
                           danger: true,
                           onClick: () => setInsDeleteTarget({ installment: i, progress: p, mode: 'delete' }),
                         },

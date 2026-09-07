@@ -267,8 +267,8 @@ export default function AccountManage() {
                     sub={formatAccount(a)}
                     icon="account_balance"
                     items={[
-                      { icon: 'edit_note', label: 'แก้ไขบัญชี', desc: 'ชื่อ ธนาคาร ประเภท เลขบัญชี ไอคอน และยอดคงเหลือ', onClick: () => setEditing(a) },
-                      { icon: 'close', label: 'ลบบัญชีนี้', desc: 'รายการที่เคยผูกกับบัญชีนี้ยังอยู่ในประวัติ', danger: true, onClick: () => setDeleting(a) },
+                      { icon: 'edit_note', label: 'แก้ไขบัญชี', desc: 'ชื่อ ธนาคาร ยอด', onClick: () => setEditing(a) },
+                      { icon: 'close', label: 'ลบบัญชีนี้', desc: 'ประวัติยังอยู่', danger: true, onClick: () => setDeleting(a) },
                     ]}
                   />
                 </div>
