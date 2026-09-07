@@ -36,6 +36,7 @@ import { buildLogEntry } from '../../lib/logBuilder'
 import useLogStore from '../../store/useLogStore'
 import { useNegativeConfirm } from '../../hooks/useNegativeConfirm'
 import { useFormDraft, DraftBanner } from '../../hooks/useFormDraft'
+import { focusNextField } from '../../lib/formUx'
 import useFormDefaults from '../../hooks/useFormDefaults'
 import UiIcon from '../../components/shared/UiIcon'
 import AmountNumpadPopup from '../../components/shared/AmountNumpadPopup'
@@ -727,7 +728,8 @@ export default function ExpenseForm({ onPreviewChange, lockCardId = null, onSave
 
   return (
     <>
-      <div className="p-4 sm:p-5 space-y-4">
+      {/* data-form-scope = ขอบเขตของ "ช่องถัดไป" ตอนกด Enter (ดู focusNextField) */}
+      <div data-form-scope className="p-4 sm:p-5 space-y-4">
         <DraftBanner hasDraft={hasDraft} onClear={clearDraft} />
         <DateNavigator date={date} onChange={setDate} />
 
@@ -749,10 +751,20 @@ export default function ExpenseForm({ onPreviewChange, lockCardId = null, onSave
                   ปุ่มแป้นตัวเลขอยู่ในช่องเลย เพราะเป็นทางที่คนกรอกยอดหลายใบเสร็จใช้บ่อย
                   (มือถือปุ่มนี้พับ/กางแป้นในแถบล่าง จอใหญ่เปิดป๊อปอัป) */}
               <div className="h-[54px] lg:h-[46px] border border-ink shadow-[0_0_0_1px_#16181D] rounded-ctl bg-white flex items-center gap-[7px] pl-3.5 pr-1.5">
+                {/* เปิดหน้ามาแล้วพิมพ์ยอดได้เลย ไม่ต้องคลิกก่อน — ยอดเงินคือช่องแรกเสมอ
+                    เฉพาะจอใหญ่ เพราะบนมือถือการโฟกัสจะดันคีย์บอร์ดของเครื่องขึ้นมา
+                    ทับแป้นตัวเลขของแอปที่กางอยู่แล้ว กลายเป็นแป้นซ้อนแป้น
+                    Enter = ไปช่องถัดไป (ชื่อรายการ) พิมพ์รวดเดียวจบไม่ต้องละมือไปจับเมาส์ */}
                 <AmountInput
                   className="flex-1 min-w-0 border-none outline-none bg-transparent text-[26px] lg:text-[21px] font-semibold tabular-nums tracking-[-0.01em] p-0 h-auto"
                   value={form.amount}
                   onChange={(e) => set('amount', e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key !== 'Enter' || e.shiftKey) return
+                    e.preventDefault()
+                    focusNextField(e.currentTarget)
+                  }}
+                  autoFocus={!isMobile()}
                   placeholder="0"
                 />
                 <span className="w-0.5 h-5 bg-lime block flex-none" />

@@ -16,17 +16,27 @@ import { walletTarget } from '../../lib/api/transactions'
 import { buildLogEntry } from '../../lib/logBuilder'
 import { useFormDraft, DraftBanner } from '../../hooks/useFormDraft'
 import useFormDefaults, { setFormDefaults } from '../../hooks/useFormDefaults'
+import { focusNextField } from '../../lib/formUx'
 
 const EMPTY = { cash: '', transfer: '', otherAmount: '', otherType: '', otherMethod: 'cash', note: '', detail: '', docType: 'none', transferAccountId: '', otherAccountId: '', category: '' }
 
-/** ช่องกรอกยอดขนาดคงที่ท้ายแถวช่องทางรับเงิน — ตัวเลขชิดขวาให้เทียบกันได้ทุกแถว */
-function AmountField({ value, onChange }) {
+/**
+ * ช่องกรอกยอดขนาดคงที่ท้ายแถวช่องทางรับเงิน — ตัวเลขชิดขวาให้เทียบกันได้ทุกแถว
+ * Enter = ไปช่องถัดไป (ช่องทางรับเงินถัดไป แล้วต่อด้วยช่องประเภท) พิมพ์รวดเดียวจบ
+ */
+function AmountField({ value, onChange, autoFocus = false }) {
   return (
     <span className="flex-none w-[146px] h-10 border border-hairline rounded-[11px] bg-white flex items-center px-[11px]">
       <AmountInput
         className="flex-1 min-w-0 border-none outline-none bg-transparent text-[15px] font-semibold text-right tabular-nums p-0 h-auto"
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key !== 'Enter' || e.shiftKey) return
+          e.preventDefault()
+          focusNextField(e.currentTarget)
+        }}
+        autoFocus={autoFocus}
         placeholder="0"
       />
       <span className="flex-none text-[11.5px] text-faint ml-[7px]">บาท</span>
@@ -38,7 +48,7 @@ function AmountField({ value, onChange }) {
  * หนึ่งแถวของช่องทางรับเงิน — ไอคอน + ชื่อ + คำอธิบาย + ช่องยอด
  * แถวที่มียอดจะขึ้นขอบเข้ม เห็นได้ทันทีว่ากำลังจะบันทึกกี่รายการ
  */
-function IncomeRow({ on, icon, iconBg, iconFg, label, sub, value, onChange, extra }) {
+function IncomeRow({ on, icon, iconBg, iconFg, label, sub, value, onChange, extra, autoFocus = false }) {
   return (
     <div
       className={`flex items-center gap-[11px] rounded-[13px] border px-[11px] py-[9px] transition ${
@@ -53,7 +63,7 @@ function IncomeRow({ on, icon, iconBg, iconFg, label, sub, value, onChange, extr
         <span className="block text-[11px] text-faint truncate">{sub}</span>
       </span>
       {extra}
-      <AmountField value={value} onChange={onChange} />
+      <AmountField value={value} onChange={onChange} autoFocus={autoFocus} />
     </div>
   )
 }
@@ -292,7 +302,8 @@ export default function IncomeForm({ onPreviewChange }) {
   const nextStep = stepDone[0] ? (stepDone[1] ? -1 : 1) : 0
 
   return (
-    <div className="flex flex-col">
+    // data-form-scope = ขอบเขตของ "ช่องถัดไป" ตอนกด Enter (ดู focusNextField)
+    <div data-form-scope className="flex flex-col">
       <div className="px-5 pt-4 space-y-4">
         <DraftBanner hasDraft={hasDraft} onClear={clearDraft} />
         <DateNavigator date={date} onChange={setDate} />
@@ -319,6 +330,9 @@ export default function IncomeForm({ onPreviewChange }) {
             sub="เข้ากระเป๋าเงินสดในร้าน"
             value={form.cash}
             onChange={(v) => set('cash', v)}
+            // เปิดหน้ามาแล้วพิมพ์ยอดได้เลย — เฉพาะจอใหญ่ บนมือถือการโฟกัสจะดัน
+            // คีย์บอร์ดของเครื่องขึ้นมาบังฟอร์มทั้งหน้าตั้งแต่ยังไม่ได้เริ่มกรอก
+            autoFocus={typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches}
           />
 
           <IncomeRow

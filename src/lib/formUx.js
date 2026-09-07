@@ -127,3 +127,29 @@ export function installGlobalFormUx() {
   // click ต้องมาหลัง mouseup จึงจะเลือกข้อความค้างไว้ได้ (ดู selectOnFirstClick)
   document.addEventListener('click', onClick, true)
 }
+
+/**
+ * ย้ายโฟกัสไปช่องกรอกถัดไปในฟอร์มเดียวกัน — ใช้กับ Enter ในช่องยอดเงิน
+ *
+ * ในหน้าบันทึกรายการ ยอดเงินคือช่องแรกที่กรอกเสมอ พอกรอกเสร็จมือต้องไปช่องถัดไป
+ * (รายจ่าย = ชื่อรายการ · รายรับ = ช่องทางถัดไป) การให้กด Enter ทำแทน Tab จึงพิมพ์รวดเดียวจบ
+ * ไม่ต้องละมือไปหาเมาส์ทุกครั้ง — คนคีย์ใบเสร็จทีละสิบใบรู้สึกต่างทันที
+ *
+ * นับเฉพาะช่องที่ "กรอกได้จริง" (ปุ่มไม่นับ) ไม่งั้นจะกระโดดไปโดนปุ่มยอดด่วนที่อยู่ข้างๆ
+ * และจำกัดขอบเขตไว้ในกล่องฟอร์มเดียวกัน จะได้ไม่หลุดไปโฟกัสช่องของแผงอื่นในหน้า
+ */
+const FIELDS = 'input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]), select, textarea'
+
+export function focusNextField(from) {
+  if (!from) return false
+  const scope = from.closest('[data-form-scope], form') ?? document
+  const list = [...scope.querySelectorAll(FIELDS)]
+    .filter((el) => !el.disabled && !el.readOnly && el.offsetParent !== null)
+  const i = list.indexOf(from)
+  const next = i === -1 ? null : list[i + 1]
+  if (!next) return false
+  next.focus()
+  // ช่องที่มีค่าอยู่แล้วให้เลือกทั้งหมด พิมพ์ทับได้เลยเหมือนกฎเดิมของช่องตัวเลข
+  if (typeof next.select === 'function' && next.value) next.select()
+  return true
+}
