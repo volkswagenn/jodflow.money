@@ -45,6 +45,30 @@ function AmountField({ value, onChange, autoFocus = false }) {
 }
 
 /**
+ * ชิปบัญชีปลายทาง — ชื่อธนาคารต้องเด่นเท่าชื่อช่องทาง ไม่ใช่ตัวจางบรรทัดรอง
+ * เพราะคำถามตอนกรอกคือ "เข้าบัญชีไหน" ถ้ายังไม่เลือกก็ต้องเห็นเป็นสีเตือน ไม่ใช่กลืนไปกับพื้น
+ */
+function AccountChip({ label, chosen, onClick, className = '' }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={chosen ? `เข้าบัญชี ${label} — กดเพื่อเปลี่ยน` : 'ยังไม่ได้เลือกบัญชี — กดเพื่อเลือก'}
+      className={`flex-none max-w-[280px] h-9 pl-2.5 pr-2 rounded-[10px] border flex items-center gap-1.5 text-[12.5px] font-semibold transition ${
+        chosen
+          ? 'border-[#B9CDEB] bg-[#EEF5FD] text-[#1F4E8C] hover:border-[#3A55C4]'
+          : 'border-dashed border-[#E0B65A] bg-[#FFF8E6] text-[#8A6A15] hover:border-[#8A6A15]'
+      } ${className}`}
+    >
+      <Icon name={chosen ? 'account_balance' : 'error'} size={16} className="flex-none" />
+      <span className="truncate">{chosen ? label : 'เลือกบัญชี'}</span>
+      {chosen && <span className="flex-none text-[10.5px] font-medium opacity-60 ml-0.5">เปลี่ยน</span>}
+      <Icon name="expand_more" size={15} className="flex-none opacity-60" />
+    </button>
+  )
+}
+
+/**
  * หนึ่งแถวของช่องทางรับเงิน — ไอคอน + ชื่อ + คำอธิบาย + ช่องยอด
  * แถวที่มียอดจะขึ้นขอบเข้ม เห็นได้ทันทีว่ากำลังจะบันทึกกี่รายการ
  */
@@ -285,8 +309,10 @@ export default function IncomeForm({ onPreviewChange }) {
 
   const total = cashAmt + transferAmt + otherAmt
   const filledCount = [cashAmt, transferAmt, otherAmt].filter((n) => n > 0).length
-  const accountLabel = getAccountLabel(resolveAccount(form.transferAccountId)) || 'ยังไม่ได้เลือกบัญชี'
-  const otherAccountLabel = getAccountLabel(resolveAccount(form.otherAccountId)) || 'ยังไม่ได้เลือกบัญชี'
+  const transferChosen = !!resolveAccount(form.transferAccountId)
+  const otherChosen = !!resolveAccount(form.otherAccountId)
+  const accountLabel = transferChosen ? getAccountLabel(resolveAccount(form.transferAccountId)) : 'ยังไม่ได้เลือกบัญชี'
+  const otherAccountLabel = otherChosen ? getAccountLabel(resolveAccount(form.otherAccountId)) : 'ยังไม่ได้เลือกบัญชี'
   const otherNeedsType = otherAmt > 0 && !form.otherType.trim()
 
   // สรุปสั้นๆ ว่าในส่วนที่พับไว้มีอะไรกรอกไปแล้วบ้าง จะได้ไม่ต้องกางดูทุกครั้ง
@@ -341,19 +367,10 @@ export default function IncomeForm({ onPreviewChange }) {
             iconBg="#E7EAFA"
             iconFg="#3A55C4"
             label="เงินโอน"
-            sub={isPendingMode ? `ตั้งไว้ว่าจะเข้า ${accountLabel}` : accountLabel}
+            sub={isPendingMode ? 'ตั้งไว้ว่าจะเข้าบัญชีที่เลือก' : 'เข้าบัญชีธนาคารที่เลือก'}
             value={form.transfer}
             onChange={(v) => set('transfer', v)}
-            extra={
-              <button
-                type="button"
-                onClick={() => setPickAcct('transfer')}
-                className="flex-none h-8 px-2.5 rounded-[9px] border border-hairline bg-white text-[11.5px] font-semibold text-muted flex items-center gap-[5px] hover:bg-[#F2FAD9] hover:border-ink hover:text-ink"
-              >
-                เปลี่ยนบัญชี
-                <Icon name="expand_more" size={16} />
-              </button>
-            }
+            extra={<AccountChip label={accountLabel} chosen={transferChosen} onClick={() => setPickAcct('transfer')} />}
           />
 
           {/* รายรับอื่นๆ มีสองบรรทัด เพราะต้องระบุประเภทและปลายทางเพิ่ม */}
@@ -369,7 +386,7 @@ export default function IncomeForm({ onPreviewChange }) {
               <span className="flex-1 min-w-0">
                 <span className="block text-[12.5px] font-semibold">รายรับอื่นๆ</span>
                 <span className="block text-[11px] text-faint truncate">
-                  {form.otherMethod === 'transfer' ? otherAccountLabel : 'เช่น บัตรเครดิต ดอกเบี้ย เงินคืน'}
+                  {form.otherMethod === 'transfer' ? 'เข้าบัญชีธนาคารที่เลือกด้านล่าง' : 'เช่น บัตรเครดิต ดอกเบี้ย เงินคืน'}
                 </span>
               </span>
               <AmountField value={form.otherAmount} onChange={(v) => set('otherAmount', v)} />
@@ -404,14 +421,7 @@ export default function IncomeForm({ onPreviewChange }) {
                 )
               })}
               {form.otherMethod === 'transfer' && (
-                <button
-                  type="button"
-                  onClick={() => setPickAcct('other')}
-                  className="flex-none h-[34px] px-2.5 rounded-[10px] border border-hairline bg-white text-[11.5px] font-semibold text-muted flex items-center gap-1 hover:bg-[#F2FAD9] hover:border-ink hover:text-ink"
-                >
-                  {form.otherAccountId ? 'เปลี่ยนบัญชี' : 'เลือกบัญชี'}
-                  <Icon name="expand_more" size={15} />
-                </button>
+                <AccountChip label={otherAccountLabel} chosen={otherChosen} onClick={() => setPickAcct('other')} className="h-[34px]" />
               )}
             </div>
 
