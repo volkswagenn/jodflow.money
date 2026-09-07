@@ -1,10 +1,6 @@
 import { useState } from 'react'
-import Popup from '../../components/shared/Popup'
 import { Link } from 'react-router-dom'
-import AmountInput from '../../components/shared/AmountInput'
 import useWalletStore from '../../store/useWalletStore'
-import { moveBetweenTransferAccounts } from '../../lib/walletEngine'
-import TransferAccountPicker, { formatAccount } from '../../components/shared/TransferAccountPicker'
 import AmountDisplay from '../../components/shared/AmountDisplay'
 import AppIcon from '../../components/shared/AppIcon'
 import { DEFAULT_ICONS } from '../../lib/defaultIcons'
@@ -17,95 +13,18 @@ import { kindLabel } from '../Manage/AccountManage'
  * การเพิ่ม แก้ไข ลบ ย้ายไปอยู่ที่ จัดการข้อมูล → บัญชีธนาคาร (AccountManage)
  * เพื่อให้หน้านี้เหลือแต่งานประจำวัน ไม่มีปุ่มแก้ไขปนกับตัวเลข
  */
-function MovePopup({ accounts, onConfirm, onClose }) {
-  const [fromId, setFromId] = useState(accounts[0]?.id ?? '')
-  const [toId, setToId] = useState(accounts[1]?.id ?? '')
-  const [amount, setAmount] = useState('')
-  const [error, setError] = useState('')
-
-  const submit = () => {
-    const amt = Number(amount)
-    if (!fromId || !toId) return setError('เลือกบัญชีต้นทางและปลายทาง')
-    if (fromId === toId) return setError('ต้องเป็นคนละบัญชี')
-    if (!amt || amt <= 0) return setError('กรอกจำนวนเงิน')
-    onConfirm(fromId, toId, amt)
-  }
-
-  const from = accounts.find((a) => a.id === fromId)
-  const to = accounts.find((a) => a.id === toId)
-  const amt = Number(amount) || 0
-
-  return (
-    <Popup
-      title="ย้ายเงินระหว่างบัญชี"
-      sub="ยอดรวมเงินโอนไม่เปลี่ยน แค่ย้ายจากบัญชีหนึ่งไปอีกบัญชี"
-      icon="swap_horiz"
-      width={440}
-      onClose={onClose}
-      onConfirm={submit}
-      confirmLabel={amt > 0 ? `ย้าย ${amt.toLocaleString('th-TH', { minimumFractionDigits: 2 })} บาท` : 'ย้ายเงิน'}
-      error={error}
-    >
-        {/* ตัวเลือกบัญชีชุดเดียวกับที่อื่นในแอป (มีโลโก้ + ยอด) ไม่ใช้ <select> ของเบราว์เซอร์ */}
-        <TransferAccountPicker
-          value={fromId}
-          onChange={(id) => { setFromId(id); if (id === toId) setToId(''); setError('') }}
-          label="จากบัญชี"
-        />
-        <TransferAccountPicker
-          value={toId}
-          onChange={(id) => { setToId(id); setError('') }}
-          label="ไปบัญชี"
-          exclude={fromId ? [fromId] : []}
-        />
-        <div>
-          <label className="label">จำนวนเงิน (บาท)</label>
-          <AmountInput className="input text-right text-[19px] font-semibold tabular-nums" value={amount}
-            onChange={(e) => { setAmount(e.target.value); setError('') }} placeholder="0.00" autoFocus />
-        </div>
-        {from && to && amt > 0 && (
-          <div className="grid grid-cols-2 gap-2 text-[11.5px]">
-            <div className="bg-[#FAF9F6] border border-[#EFEDE7] rounded-ctl px-3 py-2">
-              <span className="block text-faint truncate">{formatAccount(from)}</span>
-              <b className={`tabular-nums ${Number(from.balance) - amt < 0 ? 'text-expense' : 'text-ink'}`}>
-                {(Number(from.balance) - amt).toLocaleString('th-TH', { minimumFractionDigits: 2 })}
-              </b>
-            </div>
-            <div className="bg-[#FAF9F6] border border-[#EFEDE7] rounded-ctl px-3 py-2">
-              <span className="block text-faint truncate">{formatAccount(to)}</span>
-              <b className="tabular-nums text-ink">
-                {(Number(to.balance) + amt).toLocaleString('th-TH', { minimumFractionDigits: 2 })}
-              </b>
-            </div>
-          </div>
-        )}
-    </Popup>
-  )
-}
-
 export default function TransferAccountList() {
   const accounts = useWalletStore((s) => s.transferAccounts)
-  const [moveOpen, setMoveOpen] = useState(false)
   const [menuAccount, setMenuAccount] = useState(null)
-
-  const handleMove = async (fromId, toId, amount) => {
-    await moveBetweenTransferAccounts(fromId, toId, amount)
-    setMoveOpen(false)
-  }
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between gap-2 flex-wrap">
-        <p className="text-xs text-gray-500">
-          ยอดรวมของทุกบัญชีคือยอด "กระเป๋าเงินโอน" ที่แสดงด้านบนและบนหน้า Dashboard
-        </p>
-        <div className="flex gap-2">
-          {accounts.length > 1 && (
-            <button className="btn btn-primary text-xs" onClick={() => setMoveOpen(true)}>↔️ ย้ายเงิน</button>
-          )}
-          <Link to="/manage/accounts" className="btn btn-secondary text-xs">จัดการบัญชี</Link>
-        </div>
-      </div>
+      {/* ไม่มีปุ่ม "ย้ายเงิน" กับ "จัดการบัญชี" ซ้ำตรงนี้แล้ว — ย้ายเงินอยู่ในเมนู ⋮ ท้ายบัญชี
+          (โอนไปบัญชีอื่น) ซึ่งรู้อยู่แล้วว่าย้ายจากบัญชีไหน ส่วนจัดการบัญชีอยู่ที่หัวการ์ด
+          หัวข้อนี้จึงเหลือแต่ตัวเลขให้อ่าน ไม่มีปุ่มปนกับยอดเงิน */}
+      <p className="text-xs text-gray-500">
+        ยอดรวมของทุกบัญชีคือยอด "กระเป๋าเงินโอน" ที่แสดงด้านบนและบนหน้า Dashboard
+      </p>
 
       {accounts.length === 0 ? (
         <div className="text-center py-10 text-gray-400">
@@ -151,9 +70,6 @@ export default function TransferAccountList() {
         </div>
       )}
 
-      {moveOpen && (
-        <MovePopup accounts={accounts} onConfirm={handleMove} onClose={() => setMoveOpen(false)} />
-      )}
       {menuAccount && (
         <WalletItemPopup kind="bank" item={menuAccount} onClose={() => setMenuAccount(null)} />
       )}
