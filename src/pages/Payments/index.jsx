@@ -284,12 +284,30 @@ export default function PaymentsPage() {
                     <Icon name={meta.icon} size={17} />
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block text-[12.5px] font-medium truncate">{r.title}</span>
+                    <span className="flex items-center gap-1.5 min-w-0">
+                      <span className="text-[12.5px] font-medium truncate">{r.title}</span>
+                      {/* ชนิดการจ่ายเป็นป้ายสีเดียวกับไอคอน — กวาดตาแล้วรู้ทันทีว่าแถวนี้คือบิล ค่างวด หรือรายการประจำ */}
+                      <span className={`flex-none text-[10.5px] font-semibold px-1.5 py-[1px] rounded-md ${meta.tone}`}>{meta.label}</span>
+                    </span>
                     <span className="block text-[11px] text-faint truncate">
                       {whenText(r.paidAt)}
                       {r.detail && ` · ${r.detail}`}
-                      {r.source && ` · ${r.incoming ? 'เข้า' : 'จาก'}${r.source}`}
+                      {/* จอแคบไม่มีคอลัมน์กระเป๋า จึงยังบอกไว้ในบรรทัดรอง */}
+                      <span className="md:hidden">{r.source && ` · ${r.incoming ? 'เข้า' : 'จาก'}${r.source}`}</span>
                     </span>
+                  </span>
+                  {/* กระเป๋าที่ตัดเงิน — คอลัมน์ของตัวเอง เพราะ "จ่ายผิดกระเป๋า" คือสิ่งที่มาหน้านี้เพื่อหา */}
+                  <span
+                    title={r.source ? `${r.incoming ? 'รับเข้า' : 'ตัดจาก'} ${r.source}` : 'ไม่ได้บันทึกว่าจ่ายจากกระเป๋าไหน'}
+                    className={`hidden md:flex flex-none w-[210px] h-[30px] px-2.5 rounded-[9px] border items-center gap-1.5 min-w-0 text-[11.5px] font-medium ${
+                      !r.source ? 'border-dashed border-[#D8D4C9] text-faint'
+                        : r.incoming ? 'border-[#BFE0D2] bg-income-soft text-[#0F6A50]'
+                        : r.source === 'เงินสด' ? 'border-[#E4E0D4] bg-[#FBF7EA] text-[#7A5A12]'
+                        : 'border-[#CFE0F5] bg-[#EEF5FD] text-[#1F4E8C]'
+                    }`}
+                  >
+                    <Icon name={r.source === 'เงินสด' ? 'payments' : 'account_balance'} size={15} className="flex-none" />
+                    <span className="truncate">{r.source ?? 'ไม่ระบุกระเป๋า'}</span>
                   </span>
                   {files.length > 0 ? (
                     <button
