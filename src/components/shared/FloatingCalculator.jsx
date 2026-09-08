@@ -221,6 +221,13 @@ export default function FloatingCalculator() {
     return {
       onPointerDown: (e) => {
         if (e.button != null && e.button !== 0) return
+        // กดโดนปุ่มลูกที่อยู่บนที่จับ (โน๊ต ประวัติ ปักหมุด ปิด) = ไม่ใช่การลาก
+        //
+        // สำคัญมาก: ถ้าปล่อยให้ที่จับเรียก setPointerCapture ตอนกดปุ่มลูก เบราว์เซอร์
+        // จะส่ง pointer ต่อไปให้ตัวที่จับ แล้ว "ไม่ยิง click ให้ปุ่มลูกเลย" ปุ่มบนแถบหัว
+        // จึงกดไม่ติดทั้งแถบ (เทสต์ด้วย .click() ไม่เจอ เพราะไม่ได้ผ่าน pointer)
+        const btn = e.target.closest?.('button, a, input, textarea, select')
+        if (btn && btn !== e.currentTarget) return
         const b = box()
         st.bx = b.x; st.by = b.y; st.w = b.w; st.h = b.h
         st.sx = e.clientX; st.sy = e.clientY
@@ -600,7 +607,11 @@ export default function FloatingCalculator() {
           </Drawer>
 
           {/* ตัวกล่องขาว */}
-          <div className="relative z-[1] bg-white rounded-[18px] border border-hairline shadow-[0_18px_60px_rgba(22,24,29,.34)] overflow-hidden">
+          {/* ปักหมุดอยู่ = ขอบมะนาวรอบกล่อง เห็นแต่ไกลว่าทำไมกดนอกกล่องแล้วไม่พับ
+              (ปุ่มติดไฟอย่างเดียวเล็กเกินกว่าจะสังเกตเห็นตอนกำลังทำอย่างอื่น) */}
+          <div className={`relative z-[1] bg-white rounded-[18px] border overflow-hidden shadow-[0_18px_60px_rgba(22,24,29,.34)] ${
+            pinned ? 'border-lime ring-2 ring-lime/60' : 'border-hairline'
+          }`}>
             <div
               {...barDrag.current}
               className="h-[42px] flex items-center gap-2 pl-3 pr-2 bg-[#FAF9F6] border-b border-[#EFEDE7] cursor-grab select-none [&.is-lifted]:cursor-grabbing [&.is-lifted]:bg-[#F2FAD9]"
