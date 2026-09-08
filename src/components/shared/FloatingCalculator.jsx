@@ -123,8 +123,7 @@ export default function FloatingCalculator() {
   const [histOpen, setHistOpen] = useState(() => store.get('histOpen', false))
   const [history, setHistory] = useState(() => store.get('history', []))
   const [notesOpen, setNotesOpen] = useState(() => store.get('notesOpen', false))
-  const [notes, setNotes] = useState(() => store.get('notes', []))
-  const [noteText, setNoteText] = useState('')
+  const [note, setNote] = useState(() => store.get('note', ''))
   const [flipDrawers, setFlipDrawers] = useState(false)
   // จอแคบ = ลิ้นชักเลื่อนมาทับตัวเครื่องแทนการกางข้างๆ และเปิดได้ทีละอัน
   const [narrow, setNarrow] = useState(() => window.innerWidth < 640)
@@ -368,28 +367,7 @@ export default function FloatingCalculator() {
     rerender()
   }, [rerender])
 
-  const notesTotal = round2(notes.reduce((sum, n) => sum + (Number(n.value) || 0), 0))
   const drawerSide = flipDrawers ? 'right' : 'left'
-
-  /** จดยอดที่อยู่บนหน้าจอตอนนี้ ชื่อไม่ใส่ก็ได้ */
-  const addNote = useCallback(() => {
-    const value = Number(calc.current.cur)
-    if (!Number.isFinite(value)) return
-    setNotes((list) => {
-      const next = [...list, { id: Date.now(), text: noteText.trim(), value }]
-      store.set('notes', next)
-      return next
-    })
-    setNoteText('')
-  }, [noteText])
-
-  const removeNote = useCallback((id) => {
-    setNotes((list) => {
-      const next = list.filter((n) => n.id !== id)
-      store.set('notes', next)
-      return next
-    })
-  }, [])
 
   const doClose = useCallback(() => {
     setClosing(true)
@@ -522,88 +500,33 @@ export default function FloatingCalculator() {
             </div>
           </Drawer>
 
-          {/* แถบโน๊ต — ยอดที่จดมาจากบิล/กระดาษ กดยอดไหนก็ดึงกลับเข้าเครื่องคิดเลขได้
+          {/* แถบโน๊ต — สมุดจดเปล่าๆ หนึ่งแผ่น พิมพ์อะไรก็ได้ ไม่มีโครงสร้างให้กรอก
+              เพราะหน้าที่ของมันคือ "จด" อย่างเดียว ตัวเลขที่คิดเสร็จแล้วมีประวัติเก็บให้อยู่แล้ว
               เปิดพร้อมประวัติได้ โน๊ตจะไปกางถัดจากประวัติอีกชั้น */}
           <Drawer
             open={notesOpen}
             side={drawerSide}
             overlay={narrow}
             depth={histOpen ? 1 : 0}
-            title="โน๊ตยอดเงิน"
-            action={notes.length > 0 && (
+            title="โน๊ต"
+            action={note.trim() !== '' && (
               <button
                 type="button"
-                onClick={() => { setNotes([]); store.set('notes', []) }}
+                onClick={() => { setNote(''); store.set('note', '') }}
                 className="text-[10.5px] font-semibold text-faint hover:text-expense hover:bg-ink/[0.07] rounded-[7px] px-1.5 py-1"
-                title="ล้างโน๊ตทั้งหมด"
+                title="ล้างโน๊ตทั้งแผ่น"
               >
                 ล้าง
               </button>
             )}
           >
-            <div className="flex-1 overflow-y-auto p-1.5 flex flex-col gap-1.5">
-              {notes.length === 0 ? (
-                <p className="text-[11px] text-faint text-center leading-[1.7] px-2 py-4">
-                  ยังไม่มีโน๊ต<br />พิมพ์ชื่อรายการแล้วกด “จด” ยอดบนหน้าจอจะถูกจดไว้ที่นี่
-                </p>
-              ) : notes.map((n) => (
-                <div key={n.id} className="border border-hairline rounded-[11px] px-2 pt-1.5 pb-[7px] bg-white">
-                  <div className="flex items-start gap-1">
-                    <span className="flex-1 min-w-0 text-[11px] text-faint truncate" title={n.text}>
-                      {n.text || 'ไม่ได้ตั้งชื่อ'}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => removeNote(n.id)}
-                      className="flex-none -mt-0.5 -mr-1 w-5 h-5 rounded-md grid place-items-center text-faint hover:text-expense hover:bg-expense-soft"
-                      title="ลบโน๊ตนี้"
-                    >
-                      <Icon name="close" size={13} />
-                    </button>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => applyResult(n.value)}
-                    title={`กดเพื่อใส่ ${money(n.value)} กลับเข้าเครื่องคิดเลข`}
-                    className="w-full mt-0.5 text-right text-[15px] font-bold tabular-nums rounded-[7px] px-1 py-0.5 hover:bg-[#F2FAD9]"
-                  >
-                    {money(n.value)}
-                  </button>
-                </div>
-              ))}
-            </div>
-
-            {/* จดยอดที่อยู่บนหน้าจอตอนนี้ — ชื่อไม่ใส่ก็ได้ */}
-            <div className="flex-none border-t border-[#EFEDE7] bg-[#FAF9F6] p-1.5 space-y-1.5">
-              {notes.length > 1 && (
-                <button
-                  type="button"
-                  onClick={() => applyResult(notesTotal)}
-                  className="w-full flex items-center justify-between rounded-[9px] border border-hairline bg-white px-2 py-1 hover:bg-[#F2FAD9]"
-                  title="ใส่ยอดรวมของโน๊ตทั้งหมดกลับเข้าเครื่องคิดเลข"
-                >
-                  <span className="text-[10.5px] text-faint">รวม {notes.length} ยอด</span>
-                  <span className="text-[12.5px] font-bold tabular-nums">{money(notesTotal)}</span>
-                </button>
-              )}
-              <div className="flex gap-1.5">
-                <input
-                  value={noteText}
-                  onChange={(e) => setNoteText(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addNote() } }}
-                  placeholder="เช่น ค่าส่ง"
-                  className="flex-1 min-w-0 h-7 rounded-[9px] border border-hairline px-2 text-[11.5px] outline-none focus:border-ink"
-                />
-                <button
-                  type="button"
-                  onClick={addNote}
-                  className="flex-none h-7 px-2.5 rounded-[9px] bg-ink text-white text-[11px] font-semibold hover:bg-black"
-                  title={`จดยอด ${display} ไว้ในโน๊ต`}
-                >
-                  จด
-                </button>
-              </div>
-            </div>
+            <textarea
+              value={note}
+              onChange={(e) => { setNote(e.target.value); store.set('note', e.target.value) }}
+              placeholder="จดอะไรก็ได้ที่นี่&#10;เช่น ยอดจากบิล เลขที่ต้องจำ&#10;บันทึกให้อัตโนมัติ"
+              spellCheck={false}
+              className="flex-1 w-full resize-none border-0 outline-none bg-white px-3 py-2.5 text-[12.5px] leading-[1.7] text-ink placeholder:text-faint placeholder:leading-[1.9]"
+            />
           </Drawer>
 
           {/* ตัวกล่องขาว */}
@@ -629,7 +552,7 @@ export default function FloatingCalculator() {
               <button
                 type="button"
                 onClick={toggleNotes}
-                title="โน๊ตยอดเงินที่จดมา"
+                title="โน๊ต — จดอะไรก็ได้ บันทึกให้อัตโนมัติ"
                 className={`w-7 h-7 flex-none rounded-lg grid place-items-center ${
                   notesOpen ? 'bg-lime text-ink' : 'text-faint hover:bg-ink/[0.07] hover:text-ink'
                 }`}
