@@ -710,8 +710,8 @@ export default function ExpenseForm({ onPreviewChange, lockCardId = null, onSave
   }
 
   /**
-   * แป้นตัวเลขบนมือถือ — อยู่ในแถบบันทึกท้ายฟอร์ม ไม่ต้องเปิดป๊อปอัป
-   * เปิดไว้ตั้งแต่แรกเพราะยอดเงินคือช่องแรกที่กรอกเสมอ ปุ่มแป้นในช่องยอดใช้พับเก็บได้
+   * แป้นตัวเลขบนมือถือ — โผล่จากขอบล่างเหมือนคีย์บอร์ดของเครื่อง ไม่ต้องเปิดป๊อปอัป
+   * เปิดไว้ตั้งแต่แรกเพราะยอดเงินคือช่องแรกที่กรอกเสมอ กด Enter บนแป้น (หรือปุ่มแป้นในช่องยอด) เพื่อพับเก็บ
    */
   // ในป๊อปอัปจากหน้าบัตรพื้นที่จำกัด แป้นสูงเกือบ 300px จะกินครึ่งจอจนไม่เห็นฟอร์ม
   // เปิดเองได้จากปุ่มแป้นในช่องยอด — บนหน้าบันทึกรายการเต็มหน้าเปิดไว้เหมือนเดิม
@@ -725,6 +725,19 @@ export default function ExpenseForm({ onPreviewChange, lockCardId = null, onSave
     set('amount', cur === '0' ? k : cur + k)
   }
   const amountLabel = Number(form.amount || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+  // ข้อความหลังกดบันทึก — ใช้ทั้งใต้ปุ่มบันทึกมือถือและในแถบบันทึกจอใหญ่
+  const saveStatus = (
+    <>
+      {saved && <span className="text-income text-sm font-medium">✓ บันทึกสำเร็จ</span>}
+      {savedNote && (
+        <span className="block w-full text-[12px] text-[#A93A2E] bg-expense-soft border border-[#F0C4BE] rounded-ctl px-3 py-1.5">
+          {savedNote}
+        </span>
+      )}
+      {errMsg && <span className="block text-expense text-sm">{errMsg}</span>}
+    </>
+  )
 
   return (
     <>
@@ -1483,17 +1496,15 @@ export default function ExpenseForm({ onPreviewChange, lockCardId = null, onSave
           )}
         </div>
 
-        {/* แถบบันทึกติดอยู่ท้ายฟอร์มเสมอ — ฟอร์มยาวขึ้นเมื่อกางรายละเอียดหรือเปิดผ่อนชำระ
-            ถ้าปุ่มลอยไปอยู่ท้ายสุดผู้ใช้จะต้องเลื่อนหาทุกครั้ง */}
-        {/* มือถือแถบนี้ต้องลอยเหนือแถบเมนูล่าง (68px) ไม่งั้นปุ่มบันทึกจะโดนบัง */}
-        {/* ในป๊อปอัปไม่มีแถบเมนูล่างให้หลบ ถ้ายังเว้น 68px ไว้ แถบบันทึกจะลอยค้างกลางจอ
-            แล้วมีเนื้อหาโผล่ใต้มันจนดูเหมือนวางผิดที่ */}
-        <div className={`sticky z-10 lg:bottom-0 -mx-4 sm:-mx-5 -mb-4 sm:-mb-5 px-4 sm:px-5 py-3 bg-white/95 backdrop-blur border-t border-[#F2F0EA] rounded-b-card flex items-center gap-3 flex-wrap ${
-          lockCardId ? 'bottom-0' : 'bottom-[68px]'
-        }`}>
-          {/* แป้นตัวเลขของจอมือถือ — 12 ปุ่ม สูง 44px ตามแบบ */}
-          {padOpen && form.method !== 'debt' && (
-            <div className="lg:hidden w-full grid grid-cols-3 gap-[7px]">
+        {/* มือถือ: แป้นตัวเลขทำตัวเหมือนคีย์บอร์ดของเครื่อง — โผล่จากขอบล่าง (เหนือแถบเมนู 68px)
+            ใช้กรอกยอดอย่างเดียว กด Enter = ยืนยันยอดแล้วแป้นพับเก็บ ฟอร์มที่เหลือจะได้ไม่โดนบัง
+            ปุ่มบันทึกไม่อยู่ในแป้นนี้ — ย้ายไปท้ายฟอร์มข้างล่าง เพราะบันทึกคือขั้นสุดท้ายหลังกรอกครบ */}
+        {/* ในป๊อปอัปไม่มีแถบเมนูล่างให้หลบ ถ้ายังเว้น 68px ไว้ แป้นจะลอยค้างกลางจอ */}
+        {padOpen && form.method !== 'debt' && (
+          <div className={`lg:hidden sticky z-10 -mx-4 sm:-mx-5 px-4 sm:px-5 py-3 bg-white/95 backdrop-blur border-t border-[#F2F0EA] ${
+            lockCardId ? 'bottom-0' : 'bottom-[68px]'
+          }`}>
+            <div className="grid grid-cols-3 gap-[7px]">
               {PAD_KEYS.map((k) => (
                 <button
                   key={k}
@@ -1506,21 +1517,43 @@ export default function ExpenseForm({ onPreviewChange, lockCardId = null, onSave
                   {k === '⌫' ? <UiIcon name="backspace" size={20} /> : k}
                 </button>
               ))}
+              {/* Enter ของแป้น = ยืนยันยอดในช่องจำนวนเงินเท่านั้น ไม่ใช่บันทึกรายการ */}
+              <button
+                type="button"
+                onClick={() => setPadOpen(false)}
+                className="col-span-3 h-11 rounded-ctl bg-lime text-ink text-[15px] font-semibold flex items-center justify-center gap-2 active:brightness-95"
+                title="ยืนยันยอดแล้วพับแป้น"
+              >
+                <Icon name="check" size={19} />
+                ยืนยันยอด{Number(form.amount) > 0 ? ` ${amountLabel} บาท` : ''}
+              </button>
             </div>
-          )}
+          </div>
+        )}
 
+        {/* มือถือ: ปุ่มบันทึกอยู่ท้ายฟอร์มตามลำดับขั้น (กรอกยอด → ชื่อ/หมวด → บันทึก)
+            ไม่ลอยติดจอ เพราะพอรวมกับแป้นตัวเลขแล้วสูงเกือบ 300px บังฟอร์มจนกรอกต่อไม่ได้ */}
+        <div className="lg:hidden pt-1 space-y-2">
           <button
-            className="h-[50px] w-full justify-center rounded-[14px] bg-ink lg:h-[42px] lg:w-auto lg:rounded-ctl lg:bg-expense px-5 text-white text-[15px] lg:text-sm font-semibold flex items-center gap-2 hover:brightness-110 disabled:opacity-50"
+            className="h-[50px] w-full justify-center rounded-[14px] bg-ink px-5 text-white text-[15px] font-semibold flex items-center gap-2 hover:brightness-110 disabled:opacity-50"
             onClick={handleSave}
             disabled={saving}
           >
-            <Icon name="check" size={20} className="lg:hidden" />
-            {saving ? 'กำลังบันทึก…' : (
-              <>
-                <span className="lg:hidden">บันทึกรายจ่าย{Number(form.amount) > 0 ? ` ${amountLabel} บาท` : ''}</span>
-                <span className="hidden lg:inline">บันทึกรายจ่าย</span>
-              </>
-            )}
+            <Icon name="check" size={20} />
+            {saving ? 'กำลังบันทึก…' : `บันทึกรายจ่าย${Number(form.amount) > 0 ? ` ${amountLabel} บาท` : ''}`}
+          </button>
+          {saveStatus}
+        </div>
+
+        {/* จอใหญ่: แถบบันทึกติดอยู่ท้ายฟอร์มเสมอ — ฟอร์มยาวขึ้นเมื่อกางรายละเอียดหรือเปิดผ่อนชำระ
+            ถ้าปุ่มลอยไปอยู่ท้ายสุดผู้ใช้จะต้องเลื่อนหาทุกครั้ง */}
+        <div className="hidden lg:flex sticky z-10 bottom-0 -mx-4 sm:-mx-5 -mb-4 sm:-mb-5 px-4 sm:px-5 py-3 bg-white/95 backdrop-blur border-t border-[#F2F0EA] rounded-b-card items-center gap-3 flex-wrap">
+          <button
+            className="h-[42px] rounded-ctl bg-expense px-5 text-white text-sm font-semibold flex items-center gap-2 hover:brightness-110 disabled:opacity-50"
+            onClick={handleSave}
+            disabled={saving}
+          >
+            {saving ? 'กำลังบันทึก…' : 'บันทึกรายจ่าย'}
           </button>
 
           {/* ปุ่มลัดสองอันที่ mockup วางไว้ข้างปุ่มบันทึก — งานที่มักทำต่อทันทีหลังกรอกยอด
@@ -1547,13 +1580,7 @@ export default function ExpenseForm({ onPreviewChange, lockCardId = null, onSave
             </button>
           )}
 
-          {saved && <span className="text-income text-sm font-medium">✓ บันทึกสำเร็จ</span>}
-          {savedNote && (
-            <span className="w-full text-[12px] text-[#A93A2E] bg-expense-soft border border-[#F0C4BE] rounded-ctl px-3 py-1.5">
-              {savedNote}
-            </span>
-          )}
-          {errMsg && <span className="text-expense text-sm">{errMsg}</span>}
+          {saveStatus}
         </div>
       </div>
 
