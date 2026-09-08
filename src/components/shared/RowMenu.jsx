@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import Popup from './Popup'
 import Icon from './Icon'
+import { toneFor } from '../../lib/actionTone'
 
 /**
  * ปุ่ม ⋮ ท้ายแถว — เก็บงานที่ทำนานๆ ครั้งไว้ข้างใน
@@ -22,7 +23,10 @@ import Icon from './Icon'
  * จึงจะรู้ว่ามีอะไรให้ทำบ้าง ตารางไอคอนกวาดตารอบเดียวเห็นครบและกดถูกตัวเร็วกว่า
  * — คำอธิบายจึงต้องสั้น (ไม่กี่คำ) ถ้ายาวกว่านั้นแปลว่าปุ่มนั้นตั้งชื่อยังไม่ดีพอ
  *
- * @param items [{ icon, label, desc, onClick, danger }]
+ * สีของแต่ละปุ่มมาจากความหมายของไอคอน (ดู lib/actionTone) เช่นฝากเงินเขียว ถอนเงินแดง
+ * ส่ง tone มาเองได้ถ้าปุ่มนั้นไม่ตรงกับกติกากลาง
+ *
+ * @param items [{ icon, label, desc, onClick, danger, tone }]
  */
 export default function RowMenu({
   title, sub, icon = 'more_vert', items = [], buttonTitle = 'เพิ่มเติม', compact = false,
@@ -51,18 +55,14 @@ export default function RowMenu({
                 type="button"
                 title={it.desc ? `${it.label} — ${it.desc}` : it.label}
                 onClick={() => { setOpen(false); it.onClick?.() }}
-                className={`aspect-square border rounded-[12px] bg-white flex flex-col items-center justify-center gap-[5px] p-2 text-center overflow-hidden transition ${
-                  it.danger
-                    ? 'border-hairline hover:bg-expense-soft hover:border-expense'
-                    : 'border-hairline hover:bg-[#F2FAD9] hover:border-ink'
+                className={`aspect-square border border-hairline rounded-[12px] bg-white flex flex-col items-center justify-center gap-[5px] p-2 text-center overflow-hidden transition ${
+                  toneFor(it).hover
                 }`}
               >
-                <span className={`w-[34px] h-[34px] flex-none rounded-[10px] flex items-center justify-center ${
-                  it.danger ? 'bg-expense-soft' : 'bg-[#F4F3EF]'
-                }`}>
-                  <Icon name={it.icon} size={19} className={it.danger ? 'text-expense' : 'text-[#5C6068]'} />
+                <span className={`w-[34px] h-[34px] flex-none rounded-[10px] flex items-center justify-center ${toneFor(it).chip}`}>
+                  <Icon name={it.icon} size={19} className={toneFor(it).icon} />
                 </span>
-                <span className={`text-[12px] font-semibold leading-tight ${it.danger ? 'text-expense' : ''}`}>
+                <span className={`text-[12px] font-semibold leading-tight ${toneFor(it).label ?? ''}`}>
                   {it.label}
                 </span>
                 {it.desc && <span className="text-[10.5px] text-faint leading-[1.3]">{it.desc}</span>}

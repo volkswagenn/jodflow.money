@@ -4,6 +4,7 @@ import { format } from 'date-fns'
 import Popup from '../../components/shared/Popup'
 import ConfirmPopup from '../../components/shared/ConfirmPopup'
 import Icon from '../../components/shared/Icon'
+import { toneFor } from '../../lib/actionTone'
 import AppIcon from '../../components/shared/AppIcon'
 import AmountInput from '../../components/shared/AmountInput'
 import DatePicker from '../../components/shared/DatePicker'
@@ -51,19 +52,19 @@ const KIND_OF = {
 const kindOf = (row) => KIND_OF[row.activityType] ?? (row.delta > 0 ? 'รับเข้า' : 'จ่ายออก')
 
 /** ปุ่มสี่เหลี่ยมในเมนู — ไอคอนบนกล่องเทา ชื่อ และคำอธิบายสั้น */
-function Tile({ icon, label, desc, onClick, disabled, danger }) {
+function Tile({ icon, label, desc, onClick, disabled, danger, tone }) {
+  // สีมาจากความหมายของปุ่ม (ดู lib/actionTone) — ฝากเขียว ถอนแดง โอนน้ำเงิน กระเป๋าย่อยน้ำตาล
+  const t = toneFor({ icon, tone, danger })
   return (
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`aspect-square border rounded-[12px] bg-white flex flex-col items-center justify-center gap-[5px] p-1.5 text-center transition disabled:opacity-40 ${
-        danger ? 'border-hairline hover:bg-expense-soft hover:border-expense' : 'border-hairline hover:bg-[#F2FAD9] hover:border-ink'
-      }`}
+      className={`aspect-square border border-hairline rounded-[12px] bg-white flex flex-col items-center justify-center gap-[5px] p-1.5 text-center transition disabled:opacity-40 ${t.hover}`}
     >
-      <span className="w-[34px] h-[34px] flex-none rounded-[10px] bg-[#F4F3EF] flex items-center justify-center">
-        <Icon name={icon} size={19} className={danger ? 'text-expense' : 'text-[#5C6068]'} />
+      <span className={`w-[34px] h-[34px] flex-none rounded-[10px] flex items-center justify-center ${t.chip}`}>
+        <Icon name={icon} size={19} className={t.icon} />
       </span>
-      <span className="text-[12px] font-semibold leading-tight">{label}</span>
+      <span className={`text-[12px] font-semibold leading-tight ${t.label ?? ''}`}>{label}</span>
       <span className="text-[10.5px] text-faint leading-[1.3]">{desc}</span>
     </button>
   )
@@ -466,7 +467,8 @@ export default function WalletItemPopup({ kind, item = null, onClose, onRename, 
       { icon: 'south_west', label: 'ฝากเงิน', desc: 'เข้ากระเป๋านี้', v: 'deposit' },
       { icon: 'north_east', label: 'ถอนเงิน', desc: 'ออกไปใช้', v: 'withdraw' },
       { icon: 'swap_horiz', label: 'โอนเงิน', desc: 'ไปกระเป๋าย่อยอื่น', v: 'transfer', disabled: subWallets.length < 2 },
-      { icon: 'handshake', label: 'ยืมเงิน', desc: 'ใช้ก่อน คืนทีหลัง', v: 'borrow' },
+      // ยืม = ยังต้องคืน จึงใช้สีเหลืองของ 'ค้างอยู่' ไม่ใช่สีน้ำตาลของกระเป๋าย่อย
+      { icon: 'handshake', label: 'ยืมเงิน', desc: 'ใช้ก่อน คืนทีหลัง', v: 'borrow', tone: 'wait' },
     ]
     : isCash
       ? [
@@ -569,7 +571,7 @@ export default function WalletItemPopup({ kind, item = null, onClose, onRename, 
               </div>
               <div className="grid grid-cols-4 gap-2">
                 {sec.tiles.map((t) => (
-                  <Tile key={t.v} icon={t.icon} label={t.label} desc={t.desc} danger={t.danger} disabled={t.disabled} onClick={() => openView(t.v)} />
+                  <Tile key={t.v} icon={t.icon} label={t.label} desc={t.desc} tone={t.tone} danger={t.danger} disabled={t.disabled} onClick={() => openView(t.v)} />
                 ))}
               </div>
             </div>
