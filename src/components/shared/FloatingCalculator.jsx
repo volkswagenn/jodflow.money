@@ -446,7 +446,18 @@ export default function FloatingCalculator() {
           [&.is-lifted]:scale-110 [&.is-lifted]:shadow-[0_14px_34px_rgba(22,24,29,.4),0_0_0_6px_rgba(199,242,80,.35)]
           ${open ? 'opacity-0 scale-50 pointer-events-none' : 'opacity-100'}`}
       >
-        <UiIcon name="numpad" tone="w" size={24} />
+        {/* ไอคอนต้องอ่านออกว่า "เครื่องคิดเลข" ตั้งแต่แวบแรก — ของเดิมเป็นจุดเก้าจุด
+            (แป้นตัวเลข) ซึ่งคนอ่านเป็นปุ่มโทรศัพท์หรือเมนูตาราง
+            วาดเป็น SVG ในตัวไม่พึ่งฟอนต์ไอคอน จะได้ไม่ต้องเพิ่มไอคอนเข้าชุดฟอนต์
+            (ชุดนั้นตัดมาเฉพาะที่ใช้จริง) และไม่มีจังหวะที่ฟอนต์ยังไม่มาแล้วเห็นเป็นคำ */}
+        <svg width="25" height="25" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+          <rect x="4" y="2.5" width="16" height="19" rx="3.2" strokeWidth="1.9" />
+          <rect x="7.2" y="5.8" width="9.6" height="3.4" rx="1.2" strokeWidth="1.6" />
+          <g fill="currentColor" stroke="none">
+            <circle cx="8.4" cy="13.2" r="1.15" /><circle cx="12" cy="13.2" r="1.15" /><circle cx="15.6" cy="13.2" r="1.15" />
+            <circle cx="8.4" cy="17.4" r="1.15" /><circle cx="12" cy="17.4" r="1.15" /><circle cx="15.6" cy="17.4" r="1.15" />
+          </g>
+        </svg>
         {pinned && (
           <span className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-lime border-2 border-ink" />
         )}
