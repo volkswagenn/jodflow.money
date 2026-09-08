@@ -54,6 +54,57 @@ const PAD = [
   { k: '0', wide: true }, { k: '.' }, { k: '=', cls: 'eq' },
 ]
 
+/**
+ * ลิ้นชักข้างเครื่องคิดเลข (ประวัติ / โน๊ต)
+ *
+ * ซ้อนกันได้: ถ้าประวัติกางอยู่แล้วเปิดโน๊ต โน๊ตจะไปโผล่ถัดจากประวัติอีกชั้น
+ * (depth = ชั้นที่เท่าไร) ไม่ใช่ทับกัน — สองอย่างนี้ใช้คู่กันบ่อย เช่นจดยอดจากบิล
+ * ไว้ในโน๊ต แล้วไล่บวกทีละยอดโดยดูประวัติว่าบวกไปถึงไหนแล้ว
+ */
+function Drawer({ open, side, depth, overlay, title, action, children }) {
+  const gap = 8 + depth * (HIST_W + 8)
+
+  // จอแคบ (มือถือ) ไม่มีที่ให้กางข้างๆ — เครื่องคิดเลขกว้าง 268 บวกลิ้นชักอีก 180
+  // เกินความกว้างจอไปแล้ว จึงเลื่อนมาทับตัวเครื่องแทน ตอนอ่านรายการก็ไม่ได้กดเลขอยู่ดี
+  if (overlay) {
+    return (
+      // เริ่มใต้แถบหัว (42px) ไม่ทับปุ่มโน๊ต/ประวัติ/ปักหมุด/ปิด ไม่งั้นเปิดแล้วปิดไม่ได้
+      // และตอนปิดต้องจางหายด้วย ไม่ใช่แค่เลื่อนออก เพราะกรอบนอก (.calc) ไม่ได้ตัดของที่ล้น
+      // (ตั้งใจ เพื่อให้ลิ้นชักแบบกางข้างโผล่ออกไปได้) ถ้าไม่จางจะเห็นแผ่นขาวค้างอยู่ริมจอ
+      <aside
+        className={`absolute left-0 right-0 bottom-0 top-[42px] z-[2] bg-white rounded-b-[18px]
+          flex flex-col overflow-hidden transition-[transform,opacity] duration-200 ease-[cubic-bezier(.2,.9,.3,1)]
+          ${open ? 'translate-x-0 opacity-100' : '-translate-x-[calc(100%+16px)] opacity-0 pointer-events-none'}`}
+      >
+        <div className="h-[38px] flex-none flex items-center gap-1.5 pl-3 pr-2 bg-[#FAF9F6] border-b border-[#EFEDE7]">
+          <span className="flex-1 text-[12px] font-semibold">{title}</span>
+          {action}
+        </div>
+        {children}
+      </aside>
+    )
+  }
+
+  return (
+    <aside
+      style={side === 'right' ? { left: `calc(100% + ${gap}px)` } : { right: `calc(100% + ${gap}px)` }}
+      className={`absolute top-0 h-full w-[172px] bg-white border border-hairline rounded-[16px]
+        shadow-[0_18px_60px_rgba(22,24,29,.22)] flex flex-col overflow-hidden z-0
+        transition-[transform,opacity] duration-200 ease-[cubic-bezier(.2,.9,.3,1)]
+        ${side === 'right' ? 'origin-left' : 'origin-right'}
+        ${open
+          ? 'translate-x-0 scale-100 opacity-100'
+          : `${side === 'right' ? '-translate-x-6' : 'translate-x-6'} scale-95 opacity-0 pointer-events-none`}`}
+    >
+      <div className="h-[42px] flex-none flex items-center gap-1.5 pl-3 pr-2 bg-[#FAF9F6] border-b border-[#EFEDE7]">
+        <span className="flex-1 text-[12px] font-semibold">{title}</span>
+        {action}
+      </div>
+      {children}
+    </aside>
+  )
+}
+
 // ทุกแบบต้องระบุ พื้น/ขอบ/สีอักษร ครบในชุดเดียว — ถ้าใส่ค่าเริ่มต้นไว้ในคลาสฐานแล้ว
 // ให้แบบอื่นมาทับ Tailwind จะเลือกอันที่ชนะตามลำดับใน CSS ไม่ใช่ลำดับที่เขียน
 // (เคยเจอ: ปุ่ม = ได้ text-white แต่พื้นยังเป็น bg-white เลยกลายเป็นปุ่มว่างเปล่า)
@@ -71,7 +122,12 @@ export default function FloatingCalculator() {
   const [pinned, setPinned] = useState(() => store.get('pinned', false))
   const [histOpen, setHistOpen] = useState(() => store.get('histOpen', false))
   const [history, setHistory] = useState(() => store.get('history', []))
-  const [histRight, setHistRight] = useState(false)
+  const [notesOpen, setNotesOpen] = useState(() => store.get('notesOpen', false))
+  const [notes, setNotes] = useState(() => store.get('notes', []))
+  const [noteText, setNoteText] = useState('')
+  const [flipDrawers, setFlipDrawers] = useState(false)
+  // จอแคบ = ลิ้นชักเลื่อนมาทับตัวเครื่องแทนการกางข้างๆ และเปิดได้ทีละอัน
+  const [narrow, setNarrow] = useState(() => window.innerWidth < 640)
 
   const fabRef = useRef(null)
   const panelRef = useRef(null)
@@ -100,6 +156,20 @@ export default function FloatingCalculator() {
     el.style.top = p.y + 'px'
   }, [])
 
+  /**
+   * ลิ้นชักกางไปทางไหน — ปกติซ้าย ถ้าซ้ายไม่พอ (นับรวมกรณีกางสองชั้น) ก็สลับไปขวา
+   * ไม่งั้นแถบจะโผล่นอกจอแล้วอ่านไม่ได้ทั้งแถบ
+   */
+  // เปิดค้างไว้สองอันจากจอใหญ่ แล้วมาเปิดในจอแคบ — ที่มีให้ทับได้แค่อันเดียว
+  useEffect(() => {
+    if (narrow && histOpen && notesOpen) { setNotesOpen(false); store.set('notesOpen', false) }
+  }, [narrow, histOpen, notesOpen])
+
+  const openCount = (histOpen ? 1 : 0) + (notesOpen ? 1 : 0)
+  const needRef = useRef(0)
+  needRef.current = Math.max(1, openCount) * (HIST_W + 8)
+  const fitDrawers = useCallback((x) => setFlipDrawers(x - needRef.current < EDGE), [])
+
   /** วางกล่อง: เคยลากเองก็อยู่ที่เดิม ไม่เคยก็กางออกจากวงกลมด้านที่มีที่ว่าง */
   const placePanel = useCallback(() => {
     const el = panelRef.current
@@ -122,15 +192,19 @@ export default function FloatingCalculator() {
     y = clamp(y, EDGE, window.innerHeight - h - EDGE)
     el.style.left = x + 'px'
     el.style.top = y + 'px'
-    // ซ้ายไม่พอกางแถบประวัติก็สลับไปกางทางขวา ไม่งั้นแถบโผล่นอกจอ
-    setHistRight(x - 8 - HIST_W < EDGE)
+    fitDrawers(x)
   }, [])
 
   useLayoutEffect(() => { placeFab() }, [placeFab, open, closing])
   useLayoutEffect(() => { if (open) placePanel() }, [open, placePanel])
+  // เปิด/ปิดลิ้นชักแล้วที่ว่างด้านซ้ายที่ต้องใช้เปลี่ยน ต้องคิดด้านใหม่ทุกครั้ง
+  useEffect(() => {
+    const el = panelRef.current
+    if (el) fitDrawers(parseFloat(el.style.left) || 0)
+  }, [histOpen, notesOpen, fitDrawers])
 
   useEffect(() => {
-    const onResize = () => { placeFab(); placePanel() }
+    const onResize = () => { setNarrow(window.innerWidth < 640); placeFab(); placePanel() }
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
   }, [placeFab, placePanel])
@@ -226,7 +300,7 @@ export default function FloatingCalculator() {
         const el = panelRef.current
         el.style.left = x + 'px'
         el.style.top = y + 'px'
-        setHistRight(x - 8 - HIST_W < EDGE)
+        fitDrawers(x)
       },
       onDrop: () => store.set('panel', panelPos.current),
     })
@@ -287,6 +361,29 @@ export default function FloatingCalculator() {
     rerender()
   }, [rerender])
 
+  const notesTotal = round2(notes.reduce((sum, n) => sum + (Number(n.value) || 0), 0))
+  const drawerSide = flipDrawers ? 'right' : 'left'
+
+  /** จดยอดที่อยู่บนหน้าจอตอนนี้ ชื่อไม่ใส่ก็ได้ */
+  const addNote = useCallback(() => {
+    const value = Number(calc.current.cur)
+    if (!Number.isFinite(value)) return
+    setNotes((list) => {
+      const next = [...list, { id: Date.now(), text: noteText.trim(), value }]
+      store.set('notes', next)
+      return next
+    })
+    setNoteText('')
+  }, [noteText])
+
+  const removeNote = useCallback((id) => {
+    setNotes((list) => {
+      const next = list.filter((n) => n.id !== id)
+      store.set('notes', next)
+      return next
+    })
+  }, [])
+
   const doClose = useCallback(() => {
     setClosing(true)
     setTimeout(() => { setClosing(false); setOpen(false) }, 120)
@@ -334,7 +431,20 @@ export default function FloatingCalculator() {
     setPinned((v) => { store.set('pinned', !v); return !v })
   }
   const toggleHist = () => {
-    setHistOpen((v) => { store.set('histOpen', !v); return !v })
+    setHistOpen((v) => {
+      const on = !v
+      store.set('histOpen', on)
+      if (on && narrow) { setNotesOpen(false); store.set('notesOpen', false) }
+      return on
+    })
+  }
+  const toggleNotes = () => {
+    setNotesOpen((v) => {
+      const on = !v
+      store.set('notesOpen', on)
+      if (on && narrow) { setHistOpen(false); store.set('histOpen', false) }
+      return on
+    })
   }
 
   return createPortal(
@@ -366,17 +476,13 @@ export default function FloatingCalculator() {
           }`}
         >
           {/* แถบประวัติ — ซ่อนอยู่ใต้กล่องแล้วเลื่อนออกมา */}
-          <aside
-            className={`absolute top-0 h-full w-[172px] bg-white border border-hairline rounded-[16px]
-              shadow-[0_18px_60px_rgba(22,24,29,.22)] flex flex-col overflow-hidden z-0
-              transition-[transform,opacity] duration-200 ease-[cubic-bezier(.2,.9,.3,1)]
-              ${histRight ? 'left-[calc(100%+8px)] origin-left' : 'right-[calc(100%+8px)] origin-right'}
-              ${histOpen
-                ? 'translate-x-0 scale-100 opacity-100'
-                : `${histRight ? '-translate-x-6' : 'translate-x-6'} scale-95 opacity-0 pointer-events-none`}`}
-          >
-            <div className="h-[42px] flex-none flex items-center gap-1.5 pl-3 pr-2 bg-[#FAF9F6] border-b border-[#EFEDE7]">
-              <span className="flex-1 text-[12px] font-semibold">ประวัติการคำนวณ</span>
+          <Drawer
+            open={histOpen}
+            side={drawerSide}
+            overlay={narrow}
+            depth={0}
+            title="ประวัติการคำนวณ"
+            action={(
               <button
                 type="button"
                 onClick={() => { setHistory([]); store.set('history', []) }}
@@ -385,7 +491,8 @@ export default function FloatingCalculator() {
               >
                 ล้าง
               </button>
-            </div>
+            )}
+          >
             <div className="flex-1 overflow-y-auto p-1.5 flex flex-col gap-1.5">
               {history.length === 0 ? (
                 <p className="text-[11px] text-faint text-center leading-[1.7] px-2 py-4">
@@ -406,7 +513,91 @@ export default function FloatingCalculator() {
                 </div>
               ))}
             </div>
-          </aside>
+          </Drawer>
+
+          {/* แถบโน๊ต — ยอดที่จดมาจากบิล/กระดาษ กดยอดไหนก็ดึงกลับเข้าเครื่องคิดเลขได้
+              เปิดพร้อมประวัติได้ โน๊ตจะไปกางถัดจากประวัติอีกชั้น */}
+          <Drawer
+            open={notesOpen}
+            side={drawerSide}
+            overlay={narrow}
+            depth={histOpen ? 1 : 0}
+            title="โน๊ตยอดเงิน"
+            action={notes.length > 0 && (
+              <button
+                type="button"
+                onClick={() => { setNotes([]); store.set('notes', []) }}
+                className="text-[10.5px] font-semibold text-faint hover:text-expense hover:bg-ink/[0.07] rounded-[7px] px-1.5 py-1"
+                title="ล้างโน๊ตทั้งหมด"
+              >
+                ล้าง
+              </button>
+            )}
+          >
+            <div className="flex-1 overflow-y-auto p-1.5 flex flex-col gap-1.5">
+              {notes.length === 0 ? (
+                <p className="text-[11px] text-faint text-center leading-[1.7] px-2 py-4">
+                  ยังไม่มีโน๊ต<br />พิมพ์ชื่อรายการแล้วกด “จด” ยอดบนหน้าจอจะถูกจดไว้ที่นี่
+                </p>
+              ) : notes.map((n) => (
+                <div key={n.id} className="border border-hairline rounded-[11px] px-2 pt-1.5 pb-[7px] bg-white">
+                  <div className="flex items-start gap-1">
+                    <span className="flex-1 min-w-0 text-[11px] text-faint truncate" title={n.text}>
+                      {n.text || 'ไม่ได้ตั้งชื่อ'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => removeNote(n.id)}
+                      className="flex-none -mt-0.5 -mr-1 w-5 h-5 rounded-md grid place-items-center text-faint hover:text-expense hover:bg-expense-soft"
+                      title="ลบโน๊ตนี้"
+                    >
+                      <Icon name="close" size={13} />
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => applyResult(n.value)}
+                    title={`กดเพื่อใส่ ${money(n.value)} กลับเข้าเครื่องคิดเลข`}
+                    className="w-full mt-0.5 text-right text-[15px] font-bold tabular-nums rounded-[7px] px-1 py-0.5 hover:bg-[#F2FAD9]"
+                  >
+                    {money(n.value)}
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            {/* จดยอดที่อยู่บนหน้าจอตอนนี้ — ชื่อไม่ใส่ก็ได้ */}
+            <div className="flex-none border-t border-[#EFEDE7] bg-[#FAF9F6] p-1.5 space-y-1.5">
+              {notes.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => applyResult(notesTotal)}
+                  className="w-full flex items-center justify-between rounded-[9px] border border-hairline bg-white px-2 py-1 hover:bg-[#F2FAD9]"
+                  title="ใส่ยอดรวมของโน๊ตทั้งหมดกลับเข้าเครื่องคิดเลข"
+                >
+                  <span className="text-[10.5px] text-faint">รวม {notes.length} ยอด</span>
+                  <span className="text-[12.5px] font-bold tabular-nums">{money(notesTotal)}</span>
+                </button>
+              )}
+              <div className="flex gap-1.5">
+                <input
+                  value={noteText}
+                  onChange={(e) => setNoteText(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addNote() } }}
+                  placeholder="เช่น ค่าส่ง"
+                  className="flex-1 min-w-0 h-7 rounded-[9px] border border-hairline px-2 text-[11.5px] outline-none focus:border-ink"
+                />
+                <button
+                  type="button"
+                  onClick={addNote}
+                  className="flex-none h-7 px-2.5 rounded-[9px] bg-ink text-white text-[11px] font-semibold hover:bg-black"
+                  title={`จดยอด ${display} ไว้ในโน๊ต`}
+                >
+                  จด
+                </button>
+              </div>
+            </div>
+          </Drawer>
 
           {/* ตัวกล่องขาว */}
           <div className="relative z-[1] bg-white rounded-[18px] border border-hairline shadow-[0_18px_60px_rgba(22,24,29,.34)] overflow-hidden">
@@ -424,6 +615,16 @@ export default function FloatingCalculator() {
                   {pinned ? 'ปักหมุดไว้ · กดนอกกล่องไม่พับ' : 'กดนอกกล่องเพื่อพับเก็บ'}
                 </span>
               </span>
+              <button
+                type="button"
+                onClick={toggleNotes}
+                title="โน๊ตยอดเงินที่จดมา"
+                className={`w-7 h-7 flex-none rounded-lg grid place-items-center ${
+                  notesOpen ? 'bg-lime text-ink' : 'text-faint hover:bg-ink/[0.07] hover:text-ink'
+                }`}
+              >
+                <UiIcon name="note" tone={notesOpen ? undefined : 'gray'} size={16} />
+              </button>
               <button
                 type="button"
                 onClick={toggleHist}
