@@ -62,6 +62,7 @@ export default function PayCardBillPopup({ statement, cardLabel, onConfirm, onCa
       title="จ่ายบิลบัตรเครดิต"
       sub={`${cardLabel} · รอบ ${statement.cycle ?? '—'}`}
       icon="credit_card"
+      tone="out"
       headTone="danger"
       width={460}
       onClose={onCancel}

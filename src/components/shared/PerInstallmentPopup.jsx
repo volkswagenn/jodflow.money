@@ -68,6 +68,7 @@ export default function PerInstallmentPopup({
       title="ปรับแต่งค่างวดทีละงวด"
       sub={`${m} งวด · เปิดสวิตช์เฉพาะงวดที่ค่างวดไม่เท่าปกติ`}
       icon="payments"
+      tone="plan"
       width={440}
       onClose={onClose}
       onConfirm={() => onSave(values.map((v) => String(v)))}

@@ -52,6 +52,7 @@ export default function CardAdvancePopup({ cardLabel, onConfirm, onCancel, busy 
     <Popup
       title="กดเงินสดจากบัตร"
       icon="point_of_sale"
+      tone="out"
       width={420}
       onClose={onCancel}
       onConfirm={submit}

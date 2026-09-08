@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import Icon from './Icon'
+import { toneFor } from '../../lib/actionTone'
 
 /**
  * เปลือกของป๊อปอัปทุกตัวในแอป
@@ -10,7 +11,9 @@ import Icon from './Icon'
  *
  * props
  *   title, sub   – ข้อความบนหัว
- *   icon         – ชื่อไอคอน Material Symbols บนสี่เหลี่ยมสีเข้ม
+ *   icon         – ชื่อไอคอน Material Symbols บนสี่เหลี่ยมหัวกล่อง
+ *   tone         – สีของสี่เหลี่ยมนั้นตามความหมาย ('in' 'out' 'move' 'pocket' 'wait' 'plan' 'info')
+ *                  ไม่ส่งมาก็เดาจากไอคอนให้เอง
  *   headTone     – 'default' | 'note' | 'danger' — สีพื้นของแถบหัว
  *   width        – ความกว้างสูงสุดของกล่อง (ค่าเริ่มต้น 460px)
  *   onClose      – ปิด (กากบาท / ปุ่มยกเลิก / กด Esc / คลิกนอกกล่อง)
@@ -28,6 +31,8 @@ export default function Popup({
   title,
   sub,
   icon = 'sticky_note_2',
+  // สีของสี่เหลี่ยมไอคอนหัวกล่อง — ไม่ส่งมาก็เดาจากไอคอน (ดู lib/actionTone)
+  tone,
   headTone = 'default',
   width = 460,
   onClose,
@@ -61,7 +66,12 @@ export default function Popup({
         style={{ maxWidth: width }}
       >
         <div className={`flex-none flex items-center gap-[11px] px-[17px] py-[13px] border-b border-[#EFEDE7] ${HEAD_TONES[headTone] ?? HEAD_TONES.default}`}>
-          <span className="w-[30px] h-[30px] flex-none rounded-[9px] bg-ink text-white flex items-center justify-center">
+          {/* สี่เหลี่ยมไอคอนบอกตั้งแต่แรกเห็นว่าป๊อปอัปนี้จะทำอะไรกับเงิน — เขียวเข้า แดงออก
+              น้ำเงินย้าย น้ำตาลกระเป๋าย่อย (ดู lib/actionTone) ป๊อปอัปที่ไม่ได้ยุ่งกับเงิน
+              ยังเป็นสี่เหลี่ยมเข้มเหมือนเดิม จะได้ไม่ใส่สีจนสีหมดความหมาย */}
+          <span className={`w-[30px] h-[30px] flex-none rounded-[9px] flex items-center justify-center ${
+            toneFor({ icon, tone, danger: danger || headTone === 'danger' }).solid
+          }`}>
             <Icon name={icon} size={17} />
           </span>
           <div className="min-w-0">

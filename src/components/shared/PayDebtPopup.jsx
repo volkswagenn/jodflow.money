@@ -49,6 +49,7 @@ export default function PayDebtPopup({ debt, entry, progress, onConfirm, onCance
       title={isRecv ? 'รับคืนค่างวด' : 'จ่ายค่างวด'}
       sub={`${debt.name} · งวดที่ ${entry.seq} จาก ${debt.months}`}
       icon="receipt_long"
+      tone="out"
       width={420}
       onClose={onCancel}
       onConfirm={submit}

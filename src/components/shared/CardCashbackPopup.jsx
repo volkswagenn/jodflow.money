@@ -40,6 +40,7 @@ export default function CardCashbackPopup({ cardLabel, estimate = 0, onConfirm, 
     <Popup
       title="บันทึกเงินคืนเข้าบัตร"
       icon="savings"
+      tone="in"
       width={420}
       onClose={onCancel}
       onConfirm={submit}

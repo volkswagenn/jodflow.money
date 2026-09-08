@@ -54,6 +54,7 @@ export default function PayCardItemPopup({ item, cardLabel, onConfirm, onCancel,
       title="จ่ายรายการนี้ก่อนออกบิล"
       sub={cardLabel}
       icon="credit_card"
+      tone="out"
       width={440}
       onClose={onCancel}
       onConfirm={submit}

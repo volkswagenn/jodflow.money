@@ -27,6 +27,7 @@ export default function ReceiveIncomeDatePopup({ open, item, method, onConfirm, 
       title="ยืนยันการรับเงิน"
       sub={item.description}
       icon="savings"
+      tone="in"
       width={420}
       onClose={onCancel}
       onConfirm={() => onConfirm(receivedDate, resolvedAccountId, toTimestamp(receivedDate, receivedTime))}

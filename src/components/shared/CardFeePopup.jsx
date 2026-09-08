@@ -31,6 +31,7 @@ export default function CardFeePopup({ cardLabel, defaultAmount = 0, onConfirm, 
     <Popup
       title="บันทึกค่าธรรมเนียมรายปี"
       icon="receipt_long"
+      tone="out"
       width={420}
       onClose={onCancel}
       onConfirm={submit}

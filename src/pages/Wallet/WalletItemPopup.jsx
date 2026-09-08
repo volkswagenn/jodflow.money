@@ -449,6 +449,26 @@ export default function WalletItemPopup({ kind, item = null, onClose, onRename, 
     : view === 'rename' ? ['เปลี่ยนชื่อกระเป๋า', 'ชื่อนี้จะไปแสดงในรายงานและในฟอร์มบันทึกรายการ']
     : view === 'del' ? [`ลบกระเป๋า ${name}`, 'ยอดที่กันไว้จะกลับไปรวมกับกระเป๋าหลัก']
     : [name, `คงเหลือ ${fmt(balance)}${isBank && live?.bankName ? ` · ${live.bankName}${live.accountNo ? ` · ${live.accountNo}` : ''}` : ''}${isSub && loanTotal > 0 ? ` · ยืมออกไป ${fmt(loanTotal)} ยังไม่คืน` : ''}`]
+  /**
+   * ไอคอนหัวกล่องเปลี่ยนตามหน้าที่เปิดอยู่ ไม่ใช่ค้างเป็นไอคอนของที่เก็บเงินตลอด
+   * เข้าหน้าฝากเงินต้องเห็นสี่เหลี่ยมเขียวลูกศรเข้าทันที ไม่ต้องอ่านหัวข้อก่อนถึงจะรู้
+   * ว่ากำลังจะทำอะไร (สีมาจาก lib/actionTone อัตโนมัติตามไอคอน)
+   */
+  const headIcon = view === 'deposit' ? 'south_west'
+    : view === 'withdraw' ? 'north_east'
+    : view === 'transfer' ? 'swap_horiz'
+    : view === 'pocket' ? 'savings'
+    : view === 'borrow' ? 'handshake'
+    : view === 'repay' ? 'south_west'
+    : view === 'receive' ? 'add'
+    : view === 'txlist' ? 'receipt_long'
+    : view === 'statement' ? 'swap_vert'
+    : view === 'yearly' ? 'calendar_month'
+    : view === 'rename' ? 'edit_note'
+    : view === 'del' ? 'delete'
+    : isCash ? 'payments' : isBank ? 'account_balance' : 'savings'
+  // หน้ายืมเงินใช้สีเหลืองของ 'ค้างอยู่' เหมือนปุ่มในเมนู ส่วนหน้าเมนูรวมไม่ใช่การกระทำ
+  const headTone2 = view === 'borrow' ? 'wait' : view === 'menu' ? 'info' : undefined
   const width = view === 'menu' ? 520 : view === 'yearly' ? 620 : (view === 'statement' || view === 'txlist') ? 660 : 470
   const okLabel = move ? move.ok : view === 'rename' ? 'บันทึกชื่อใหม่' : view === 'del' ? 'ลบกระเป๋า' : 'ปิด'
   const okDisabled = move ? (!(value > 0) || !pickOk) : false
@@ -514,7 +534,7 @@ export default function WalletItemPopup({ kind, item = null, onClose, onRename, 
 
   return (
     <>
-    <Popup title={head[0]} sub={head[1]} icon={isCash ? 'payments' : isBank ? 'account_balance' : 'savings'} width={width} onClose={onClose} footer={footer}>
+    <Popup title={head[0]} sub={head[1]} icon={headIcon} tone={headTone2} width={width} onClose={onClose} footer={footer}>
 
       {/* ── เมนู ─────────────────────────────────────────────────────── */}
       {view === 'menu' && (

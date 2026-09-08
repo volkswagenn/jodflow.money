@@ -17,46 +17,61 @@
  *   ที่ไหนไม่ตรงกับกติกาค่อยใส่ tone เองทับ (ดู toneFor)
  */
 
+/**
+ * แต่ละโทนมีสามชุด
+ *   chip/icon  พื้นอ่อน + ไอคอนสีเข้ม — ใช้กับปุ่มสี่เหลี่ยมในเมนู
+ *   solid      พื้นทึบ + ไอคอนขาว — ใช้กับไอคอนหัวป๊อปอัป ให้น้ำหนักเท่าเดิมกับของเดิม
+ *              ที่เป็นสี่เหลี่ยมสีเข้ม แต่บอกได้ด้วยว่าป๊อปอัปนี้กำลังจะทำอะไรกับเงิน
+ *   hover      สีตอนเอาเมาส์ชี้
+ */
 export const ACTION_TONES = {
   in: {
     chip: 'bg-income-soft',
     icon: 'text-income',
+    solid: 'bg-income text-white',
     hover: 'hover:bg-income-soft hover:border-income',
   },
   out: {
     chip: 'bg-expense-soft',
     icon: 'text-expense',
+    solid: 'bg-expense text-white',
     hover: 'hover:bg-expense-soft hover:border-expense',
   },
   move: {
     chip: 'bg-transfer-soft',
     icon: 'text-transfer',
+    solid: 'bg-transfer text-white',
     hover: 'hover:bg-transfer-soft hover:border-transfer',
   },
   pocket: {
     chip: 'bg-pocket-soft',
     icon: 'text-pocket',
+    solid: 'bg-pocket text-white',
     hover: 'hover:bg-pocket-soft hover:border-pocket',
   },
   wait: {
     chip: 'bg-pending-soft',
     icon: 'text-pending',
+    solid: 'bg-pending text-white',
     hover: 'hover:bg-pending-soft hover:border-pending',
   },
   plan: {
     chip: 'bg-recurring-soft',
     icon: 'text-recurring',
+    solid: 'bg-recurring text-white',
     hover: 'hover:bg-recurring-soft hover:border-recurring',
   },
   info: {
     chip: 'bg-[#F4F3EF]',
     icon: 'text-[#5C6068]',
+    solid: 'bg-ink text-white',
     hover: 'hover:bg-[#F2FAD9] hover:border-ink',
   },
   danger: {
     chip: 'bg-expense-soft',
     icon: 'text-expense',
     label: 'text-expense',
+    solid: 'bg-expense text-white',
     hover: 'hover:bg-expense-soft hover:border-expense',
   },
 }
