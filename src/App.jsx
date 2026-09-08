@@ -4,6 +4,7 @@ import Navbar from './components/layout/Navbar'
 import Sidebar from './components/layout/Sidebar'
 import BottomTabs from './components/layout/BottomTabs'
 import SearchPopup from './components/shared/SearchPopup'
+import FloatingCalculator from './components/shared/FloatingCalculator'
 
 export default function App() {
   const navigate = useNavigate()
@@ -52,6 +53,9 @@ export default function App() {
 
       <BottomTabs />
       {searchOpen && <SearchPopup onClose={() => setSearchOpen(false)} />}
+
+      {/* เครื่องคิดเลขลอย — อยู่นอกโครงหน้า จะได้ค้างอยู่ทุกหน้าและลอยเหนือทุกอย่าง */}
+      <FloatingCalculator />
     </div>
   )
 }

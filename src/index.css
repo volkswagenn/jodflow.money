@@ -131,3 +131,9 @@
   border-bottom-left-radius: 12px;
   box-shadow: -6px 6px 0 6px #fff;
 }
+
+/* ── เครื่องคิดเลขลอย ────────────────────────────────────────────────────────
+   กล่องกางออกจากวงกลม แล้วหดกลับเข้าวงกลมตอนพับ — จุดที่ขยาย/หดคือมุมที่ติดกับ
+   วงกลม (ตั้งด้วย transform-origin จาก JS) ภาพจึงต่อเนื่องเหมือนของชิ้นเดียวกัน */
+@keyframes calcIn  { from { transform: scale(.35); opacity: 0 } to { transform: scale(1); opacity: 1 } }
+@keyframes calcOut { to   { transform: scale(.35); opacity: 0 } }
