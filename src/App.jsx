@@ -5,6 +5,7 @@ import Sidebar from './components/layout/Sidebar'
 import BottomTabs from './components/layout/BottomTabs'
 import SearchPopup from './components/shared/SearchPopup'
 import FloatingCalculator from './components/shared/FloatingCalculator'
+import { AdminViewBanner, TrialBanner } from './auth/StatusBanners'
 
 export default function App() {
   const navigate = useNavigate()
@@ -38,6 +39,9 @@ export default function App() {
 
       {/* จอ lg ขึ้นไปเนื้อหาเลี่ยงเมนูข้าง 256px — จอเล็กเต็มความกว้าง เมนูเป็นลิ้นชักทับข้างบน */}
       <div className="flex-1 min-w-0 flex flex-col lg:ml-[256px]">
+        {/* แถบสถานะอยู่เหนือแถบหัวเรื่อง เพราะเป็นเรื่องของ "ทั้งแอป" ไม่ใช่ของหน้าใดหน้าหนึ่ง */}
+        <AdminViewBanner />
+        <TrialBanner />
         <Navbar onOpenSidebar={() => setSidebarOpen(true)} onOpenSearch={() => setSearchOpen(true)} />
         {/*
           เนื้อหามีเพดานกว้าง 1680px แล้วจัดกลาง — จอ 2560px ถ้าปล่อยให้ยืดเต็ม

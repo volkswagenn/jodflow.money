@@ -1,5 +1,5 @@
 import { supabase, unwrap } from '../supabase'
-import { getShopId } from './context'
+import { getShopId, getUserId } from './context'
 import { fromRow, fromRows } from './_map'
 
 /**
@@ -46,10 +46,9 @@ export async function countLogs() {
 export async function writeLog(entry) {
   // RPC write_log ใส่ auth.uid() ให้เอง แต่ทางนี้ insert ตรง ต้องใส่ผู้เขียนเอง
   // ไม่งั้นประวัติจากหน้ากระเป๋าเงิน (ฝาก/ถอน/ย้ายเงิน) จะไม่รู้ว่าใครทำ
-  const { data: sessionData } = await supabase.auth.getSession()
   const row = {
     shop_id: getShopId(),
-    user_id: sessionData?.session?.user?.id ?? null,
+    user_id: getUserId(),
     activity_type: entry.activityType,
     description: entry.description ?? null,
     old_value: entry.oldValue ?? null,

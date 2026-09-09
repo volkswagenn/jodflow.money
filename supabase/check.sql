@@ -111,7 +111,10 @@ select * from (
     ('card_installment_entries', 'paid_method',         'card.sql'),
     ('card_installment_entries', 'transfer_account_id', 'card.sql'),
     ('transactions',             'card_statement_id',   'card.sql'),
-    ('categories',               'sort_order',          'categories.sql')
+    ('categories',               'sort_order',          'categories.sql'),
+    ('profiles',                 'is_platform_admin',   'users.sql'),
+    ('shops',                    'status',              'users.sql'),
+    ('shops',                    'expires_at',          'users.sql')
   ) as t(tbl, col, file)
 
   union all
@@ -138,7 +141,12 @@ select * from (
     ('attach_transaction_to_statement',         'card.sql'),
     ('detach_transaction_from_statement',       'card.sql'),
     ('apply_statement_delta',                   'card.sql'),
-    ('reorder_categories',     'categories.sql')
+    ('reorder_categories',     'categories.sql'),
+    ('is_platform_admin',      'users.sql'),
+    ('shop_is_open',           'users.sql'),
+    ('admin_list_shops',       'users.sql'),
+    ('admin_extend_shop',      'users.sql'),
+    ('admin_set_shop_access',  'users.sql')
   ) as t(fn, file)
 
 ) as "ผลตรวจ"

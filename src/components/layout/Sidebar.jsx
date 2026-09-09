@@ -3,7 +3,7 @@ import usePendingStore from '../../store/usePendingStore'
 import useCreditCardStore from '../../store/useCreditCardStore'
 import { useAuth } from '../../auth/AuthProvider'
 import Icon from '../shared/Icon'
-import { NAV_GROUPS } from './navConfig'
+import { ADMIN_GROUP, NAV_GROUPS } from './navConfig'
 
 const ROLE_LABEL = { owner: 'เจ้าของร้าน', editor: 'ผู้บันทึก', viewer: 'ผู้ดู' }
 
@@ -55,7 +55,7 @@ function MenuItem({ item, badgeCounts, onNavigate }) {
  */
 export default function Sidebar({ open, onClose }) {
   const navigate = useNavigate()
-  const { profile, user, shop, role } = useAuth()
+  const { profile, user, shop, role, isPlatformAdmin } = useAuth()
   const version = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '3.0.0' // eslint-disable-line no-undef
 
   const pendingCount = usePendingStore((s) => s.pendingPayments.filter((p) => p.status === 'pending').length)
@@ -99,7 +99,7 @@ export default function Sidebar({ open, onClose }) {
         </button>
 
         <nav className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
-          {NAV_GROUPS.map((group) => (
+          {(isPlatformAdmin ? [...NAV_GROUPS, ADMIN_GROUP] : NAV_GROUPS).map((group) => (
             <div key={group.title} className="mb-3.5">
               <div className="text-[10.5px] tracking-[0.12em] uppercase text-[#5A5F67] px-[11px] pb-1.5">
                 {group.title}

@@ -1,21 +1,34 @@
-import { createContext, useCallback, useContext, useEffect, useState } from 'react'
-import { setShopId, setShopRole } from '../lib/api/context'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { setShopId, setShopRole, setUserId } from '../lib/api/context'
+import * as authApi from '../lib/api/auth'
 import { configError, supabase, toThaiError } from '../lib/supabase'
+import { clearSessionToken, getSessionToken, onSessionTokenChange, setSessionToken } from '../lib/sessionToken'
 import { resetStores } from '../store/hydrate'
 
 /**
- * ศูนย์กลางของ "ตอนนี้ใครล็อกอินอยู่ และอยู่ร้านไหน สิทธิ์อะไร"
+ * ศูนย์กลางของ "ตอนนี้ใครล็อกอินอยู่ อยู่ร้านไหน สิทธิ์อะไร และร้านนั้นยังใช้ได้ไหม"
+ *
+ * ระบบล็อกอินเป็นของเราเอง (supabase/users.sql หมวด 3 และ 9) ทำตามแบบ Jodflow.order:
+ *   ชั้น 1  มีตั๋วในเครื่องไหม (getSessionToken) — ไม่มี = หน้า login ทันที ไม่ยิงอะไร
+ *   ชั้น 2  ตั๋วยังมีชีวิตในฐานไหม (app_me) — ถอนตั๋ว/ปิดบัญชี มีผลทันทีที่โหลดครั้งถัดไป
  *
  * status:
- *   'unconfigured' — ยังไม่ได้ใส่ค่า Supabase ใน .env.local (สถานะตอนติดตั้งครั้งแรก)
- *   'loading'  — ยังตอบไม่ได้ (กำลังอ่าน session หรือกำลังโหลดร้าน)
- *   'anon'     — ยังไม่ได้ล็อกอิน → แสดงหน้า login
- *   'no-shop'  — ล็อกอินแล้วแต่ยังไม่ถูกเพิ่มเข้าร้านไหนเลย → ต้องให้ owner เพิ่มให้
- *   'error'    — โหลดข้อมูลร้านไม่สำเร็จ (เน็ตหลุด/DB ล่ม) → มีปุ่มลองใหม่
- *   'ready'    — ใช้งานได้
+ *   'unconfigured' — ยังไม่ได้ใส่ค่า Supabase ใน .env.local
+ *   'loading'      — ยังตอบไม่ได้
+ *   'anon'         — ยังไม่ได้ล็อกอิน / ตั๋วถูกถอน → หน้า login / สมัคร / ลืมรหัสผ่าน
+ *   'must-change'  — เข้าด้วยรหัสชั่วคราว ต้องตั้งรหัสใหม่ก่อนไปต่อ
+ *   'no-shop'      — ล็อกอินแล้วแต่ไม่มีร้าน
+ *   'blocked'      — มีร้าน แต่หมดอายุ / ถูกระงับ / ปิดบัญชี → ดู blockReason
+ *   'error'        — โหลดไม่สำเร็จ (เน็ตหลุด / ยังไม่ได้รัน users.sql) → มีปุ่มลองใหม่
+ *   'ready'        — ใช้งานได้
+ *
+ * เรื่องสิทธิ์จริงถูกกั้นที่ฐานข้อมูลตลอด — ที่นี่แค่แปลสถานะให้เป็นหน้าจอที่อ่านรู้เรื่อง
  */
-// export ไว้ให้ไฟล์พรีวิว UI ประกอบหน้าจอโดยไม่ต้องล็อกอินจริง — โค้ดแอปยังใช้ผ่าน useAuth() เท่านั้น
 export const AuthContext = createContext(null)
+
+/** คีย์ใน sessionStorage — ผูกกับแท็บนี้เท่านั้น ปิดแท็บแล้วหลุดโหมดดูร้านลูกค้าเอง */
+const ADMIN_VIEW_KEY = 'adminViewShopId'
+const SHOP_FIELDS = 'id, name, status, expires_at, trial_ends_at, suspend_reason, closed_at, created_at'
 
 export function useAuth() {
   const ctx = useContext(AuthContext)
@@ -23,144 +36,218 @@ export function useAuth() {
   return ctx
 }
 
-/** โหลด profile + ร้าน + role ของผู้ใช้คนนี้พร้อมกัน */
-async function loadContext(userId) {
-  const [profileRes, memberRes] = await Promise.all([
-    supabase.from('profiles').select('id, email, display_name').eq('id', userId).maybeSingle(),
-    supabase
-      .from('shop_members')
-      .select('role, shop:shops!inner(id, name)')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: true })
-      .limit(1),
-  ])
-
-  if (profileRes.error) throw new Error(toThaiError(profileRes.error))
-  if (memberRes.error) throw new Error(toThaiError(memberRes.error))
-
-  const membership = memberRes.data?.[0] ?? null
-  return {
-    profile: profileRes.data,
-    shop: membership?.shop ?? null,
-    role: membership?.role ?? null,
-  }
+/** ร้านนี้ยังเข้าใช้ได้ไหม — ต้องตรงกับ shop_is_open() ใน supabase/users.sql เป๊ะ */
+export function shopIsOpen(shop) {
+  if (!shop) return false
+  if (shop.status !== 'trial' && shop.status !== 'active') return false
+  if (!shop.expires_at) return true
+  return new Date(shop.expires_at).getTime() > Date.now()
 }
 
+/** เหลืออีกกี่วัน (ปัดขึ้น) — null = ไม่มีวันหมดอายุ */
+export function daysLeft(shop) {
+  if (!shop?.expires_at) return null
+  return Math.ceil((new Date(shop.expires_at).getTime() - Date.now()) / 86_400_000)
+}
+
+function blockReasonOf(shop) {
+  if (shop.status === 'suspended') return 'suspended'
+  if (shop.status === 'closed') return 'closed'
+  return 'expired'
+}
+
+async function loadMembership(userId) {
+  const { data, error } = await supabase
+    .from('shop_members')
+    .select(`role, shop:shops!inner(${SHOP_FIELDS})`)
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true })
+    .limit(1)
+  if (error) throw new Error(toThaiError(error))
+  return data?.[0] ?? null
+}
+
+/** โหลดร้านของลูกค้าที่แอดมินกดเปิดดู — ผ่าน RLS ได้เพราะ is_platform_admin() */
+async function loadShopById(shopId) {
+  const { data, error } = await supabase.from('shops').select(SHOP_FIELDS).eq('id', shopId).maybeSingle()
+  if (error) throw new Error(toThaiError(error))
+  return data
+}
+
+const EMPTY = { profile: null, shop: null, role: null, error: null, blockReason: null }
+
 export function AuthProvider({ children }) {
-  // undefined = ยังไม่รู้ว่ามี session ไหม, null = ไม่มี
-  const [session, setSession] = useState(undefined)
-  const [state, setState] = useState({ status: 'loading', profile: null, shop: null, role: null, error: null })
+  const [state, setState] = useState({ status: 'loading', ...EMPTY })
   const [reloadKey, setReloadKey] = useState(0)
+  const [adminViewShopId, setAdminViewShopId] = useState(() => sessionStorage.getItem(ADMIN_VIEW_KEY))
 
-  // ── ติดตาม session ────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (configError) return // ยังไม่ได้ตั้งค่า — อย่าเพิ่งยิงไปที่ไหน
-    let alive = true
+  const reload = useCallback(() => setReloadKey((k) => k + 1), [])
 
-    supabase.auth.getSession().then(({ data }) => {
-      if (alive) setSession(data.session ?? null)
-    })
-
-    // หมายเหตุ: ห้าม await supabase ตัวอื่นใน callback นี้ (supabase-js จะค้าง)
-    // จึงแค่เก็บ session ไว้ แล้วให้ effect ข้างล่างเป็นคนโหลดข้อมูลต่อ
-    const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
-      if (!alive) return
-      // เซสชันหลุดเอง (token หมดอายุ / ถูกเพิกถอน) ไม่ได้ผ่าน signOut() ของเรา
-      // ต้องล้าง store ตรงนี้ด้วย ไม่งั้นข้อมูลร้านเดิมค้างให้คนที่ล็อกอินต่อเห็น
-      if (event === 'SIGNED_OUT' || !s) {
-        resetStores()
-        setShopId(null)
-      }
-      setSession(s ?? null)
-    })
-
-    return () => {
-      alive = false
-      sub.subscription.unsubscribe()
-    }
-  }, [])
-
-  // ── พอรู้ว่าเป็นใคร ค่อยโหลดร้าน + สิทธิ์ ───────────────────────────────────
-  const userId = session?.user?.id ?? null
+  // ล็อกอิน/ออกจากอีกแท็บ → แท็บนี้ตามให้ทัน ไม่ค้างเป็นข้อมูลของคนก่อน
+  useEffect(() => onSessionTokenChange(() => {
+    resetStores()
+    setShopId(null)
+    reload()
+  }), [reload])
 
   useEffect(() => {
     if (configError) {
-      setState({ status: 'unconfigured', profile: null, shop: null, role: null, error: configError })
+      setState({ status: 'unconfigured', ...EMPTY, error: configError })
       return
     }
-    if (session === undefined) return // ยังอ่าน session ไม่เสร็จ
-
-    if (!userId) {
+    if (!getSessionToken()) {
       setShopId(null)
-      setState({ status: 'anon', profile: null, shop: null, role: null, error: null })
+      setUserId(null)
+      setState({ status: 'anon', ...EMPTY })
       return
     }
 
     let alive = true
     setState((s) => ({ ...s, status: 'loading', error: null }))
 
-    loadContext(userId)
-      .then(({ profile, shop, role }) => {
+    ;(async () => {
+      const me = await authApi.me()
+      if (!me) {
+        // ตั๋วในเครื่องมี แต่ฐานบอกว่าตายแล้ว (ถอน / หมดอายุ / บัญชีปิด) → ทิ้งตั๋ว
+        clearSessionToken()
+        return { status: 'anon' }
+      }
+      const profile = {
+        id: me.id,
+        email: me.email,
+        display_name: me.display_name,
+        is_platform_admin: Boolean(me.is_platform_admin),
+        has_birth_date: Boolean(me.has_birth_date),
+        phone: me.phone ?? null,
+      }
+      setUserId(me.id)
+      if (me.must_change_password) return { status: 'must-change', profile }
+
+      // แอดมินกดเปิดดูร้านลูกค้า — สลับไปผูกกับร้านนั้นแทน
+      if (adminViewShopId && profile.is_platform_admin) {
+        const target = await loadShopById(adminViewShopId)
+        if (target) return { status: 'shop', profile, shop: target, role: 'owner', adminView: true }
+        sessionStorage.removeItem(ADMIN_VIEW_KEY)
+      }
+      const m = await loadMembership(me.id)
+      return { status: 'shop', profile, shop: m?.shop ?? null, role: m?.role ?? null, adminView: false }
+    })()
+      .then((r) => {
         if (!alive) return
-        if (!shop) {
+        if (r.status === 'anon') {
           setShopId(null)
-          setState({ status: 'no-shop', profile, shop: null, role: null, error: null })
+          setUserId(null)
+          setState({ status: 'anon', ...EMPTY })
+          return
+        }
+        if (r.status === 'must-change') {
+          setShopId(null)
+          setState({ status: 'must-change', ...EMPTY, profile: r.profile })
+          return
+        }
+        if (!r.shop) {
+          setShopId(null)
+          setState({ status: 'no-shop', ...EMPTY, profile: r.profile })
+          return
+        }
+        // แอดมินต้องเข้าได้แม้ร้านลูกค้าหมดอายุ — นั่นคือเวลาที่ต้องเข้าไปดูที่สุด
+        if (!r.adminView && !shopIsOpen(r.shop)) {
+          setShopId(null)
+          setState({ status: 'blocked', ...EMPTY, profile: r.profile, shop: r.shop, role: r.role, blockReason: blockReasonOf(r.shop) })
           return
         }
         // ต้องตั้งก่อน render แอป เพราะทุก api/* อ่าน shopId จากตรงนี้
-        setShopId(shop.id)
-        setShopRole(role)
-        setState({ status: 'ready', profile, shop, role, error: null })
+        setShopId(r.shop.id)
+        setShopRole(r.role)
+        setState({ status: 'ready', ...EMPTY, profile: r.profile, shop: r.shop, role: r.role })
       })
       .catch((err) => {
-        if (alive) setState({ status: 'error', profile: null, shop: null, role: null, error: err.message })
+        if (alive) setState({ status: 'error', ...EMPTY, error: err.message })
       })
 
     return () => {
       alive = false
     }
-  }, [userId, session === undefined, reloadKey])
+  }, [reloadKey, adminViewShopId])
 
   const signIn = useCallback(async (email, password) => {
-    const { error } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
-      password,
-    })
-    if (error) throw new Error(toThaiError(error))
-  }, [])
+    const r = await authApi.login(email, password)
+    setSessionToken(r.token)
+    reload()
+  }, [reload])
+
+  /**
+   * สมัคร = ฐานข้อมูลสร้าง บัญชี + โปรไฟล์ + ร้าน + ตั๋ว ในธุรกรรมเดียว (app_signup)
+   * วันทดลอง 14 วันไม่ได้ส่งจากที่นี่ — trigger ฝั่งฐานใส่ให้เอง ใครแก้ค่าที่ส่งไปก็ไม่มีผล
+   */
+  const signUp = useCallback(async (form) => {
+    const r = await authApi.signup(form)
+    setSessionToken(r.token)
+    reload()
+  }, [reload])
 
   const signOut = useCallback(async () => {
-    // ล้าง store ก่อนตัด session — ไม่งั้นข้อมูลร้านเดิมยังค้างอยู่ในหน่วยความจำ
-    // แล้วโผล่ให้คนที่ล็อกอินต่อจากนี้เห็นชั่วขณะก่อน hydrate รอบใหม่จะเสร็จ
+    // ล้าง store ก่อนตัดตั๋ว — ไม่งั้นข้อมูลร้านเดิมยังค้างในหน่วยความจำให้คนถัดไปเห็นชั่วขณะ
     resetStores()
     setShopId(null)
+    setUserId(null)
+    sessionStorage.removeItem(ADMIN_VIEW_KEY)
+    setAdminViewShopId(null)
     try {
-      await supabase.auth.signOut()
+      await authApi.logout()
+    } catch {
+      // ออฟไลน์ก็ต้องออกจากหน้าจอให้จริง — ตั๋วฝั่งฐานจะหมดอายุเองใน 30 วัน
     } finally {
-      // ถ้าเซิร์ฟเวอร์ตอบไม่ได้ (ออฟไลน์) ก็ต้องออกจากหน้าจอให้จริง ไม่ค้างอยู่กับ store ว่างเปล่า
-      setSession(null)
+      clearSessionToken()
+      reload()
     }
-  }, [])
+  }, [reload])
 
-  const changePassword = useCallback(async (newPassword) => {
-    const { error } = await supabase.auth.updateUser({ password: newPassword })
+  const changePassword = useCallback(async (oldPassword, newPassword) => {
+    await authApi.changePassword(oldPassword, newPassword)
+    reload() // ปลดสถานะ must-change และโหลดร้าน
+  }, [reload])
+
+  /** แอดมินเปิดดูร้านลูกค้า — บันทึกลง audit log ก่อนเสมอ เขียนไม่สำเร็จก็ไม่เปิด */
+  const enterShopView = useCallback(async (shopId) => {
+    const { error } = await supabase.rpc('admin_log_action', { p_shop: shopId, p_action: 'VIEW_SHOP', p_detail: null })
     if (error) throw new Error(toThaiError(error))
+    resetStores()
+    setShopId(null)
+    sessionStorage.setItem(ADMIN_VIEW_KEY, shopId)
+    setAdminViewShopId(shopId)
   }, [])
 
-  const retry = useCallback(() => setReloadKey((k) => k + 1), [])
+  const leaveShopView = useCallback(() => {
+    resetStores()
+    setShopId(null)
+    sessionStorage.removeItem(ADMIN_VIEW_KEY)
+    setAdminViewShopId(null)
+  }, [])
 
-  const value = {
-    ...state,
-    session,
-    user: session?.user ?? null,
-    shopId: state.shop?.id ?? null,
-    canEdit: state.role === 'owner' || state.role === 'editor',
-    isOwner: state.role === 'owner',
-    signIn,
-    signOut,
-    changePassword,
-    retry,
-  }
+  const isAdminView = Boolean(adminViewShopId) && state.status === 'ready'
+
+  const value = useMemo(
+    () => ({
+      ...state,
+      // โค้ดเดิมหลายที่อ่าน user.email — คงรูปนี้ไว้
+      user: state.profile ? { id: state.profile.id, email: state.profile.email } : null,
+      shopId: state.shop?.id ?? null,
+      canEdit: state.role === 'owner' || state.role === 'editor',
+      isOwner: state.role === 'owner',
+      isPlatformAdmin: Boolean(state.profile?.is_platform_admin),
+      isAdminView,
+      shopDaysLeft: daysLeft(state.shop),
+      signIn,
+      signUp,
+      signOut,
+      changePassword,
+      enterShopView,
+      leaveShopView,
+      retry: reload,
+    }),
+    [state, isAdminView, signIn, signUp, signOut, changePassword, enterShopView, leaveShopView, reload]
+  )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

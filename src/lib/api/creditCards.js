@@ -1,5 +1,5 @@
 import { supabase, unwrap, toThaiError } from '../supabase'
-import { getShopId } from './context'
+import { getShopId, getUserId } from './context'
 import { fromRow, fromRows, toRow } from './_map'
 
 /**
@@ -212,14 +212,13 @@ export async function listCardRowMarks() {
 
 /** ติ๊กหนึ่งบรรทัด — ไม่แตะยอดเงินใดๆ เป็นแค่เครื่องหมายว่าไล่เช็คแล้ว */
 export async function markCardRow({ cardId, cycle, rowKey }) {
-  const { data: sessionData } = await supabase.auth.getSession()
   await unwrap(
     supabase.from('card_row_marks').insert({
       shop_id: getShopId(),
       card_id: cardId,
       cycle: cycle ?? null,
       row_key: rowKey,
-      marked_by: sessionData?.session?.user?.id ?? null,
+      marked_by: getUserId(),
     })
   )
   return rowKey

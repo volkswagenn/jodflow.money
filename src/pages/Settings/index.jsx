@@ -50,7 +50,7 @@ function SettingCard({ icon, title, desc, rows = [], action, onClick }) {
 export default function SettingsPage() {
   const navigate = useNavigate()
   const { notifyDaysBefore, setNotifyDaysBefore, version } = useAppStore()
-  const { profile, user, role, shop } = useAuth()
+  const { profile, user, role, shop, shopDaysLeft, isPlatformAdmin } = useAuth()
   const taxWaiting = usePendingStore((s) => s.taxInvoices.filter((t) => t.status === 'waiting').length)
   const logCount = useLogStore((s) => s.total)
 
@@ -109,6 +109,50 @@ export default function SettingsPage() {
         action="จัดการบัญชีและรหัสผ่าน"
         onClick={() => setPanel('account')}
       />
+
+      {/* สถานะการใช้งาน — ต้องหาเจอโดยไม่ต้องรอให้แถบเตือนขึ้น ลูกค้าที่อยากต่ออายุ
+          ล่วงหน้าจะได้รู้ว่าตัวเองเหลือกี่วันโดยไม่ต้องทักมาถาม */}
+      <SettingCard
+        icon="workspace_premium"
+        title="สถานะการใช้งาน"
+        desc={
+          shop?.status === 'trial'
+            ? 'ช่วงทดลองใช้ฟรี — ข้อมูลที่บันทึกไว้จะอยู่ต่อแม้หมดช่วงทดลอง'
+            : 'สิทธิ์การใช้งานของสมุดบัญชีนี้'
+        }
+        rows={[
+          {
+            label: 'สถานะ',
+            value: shop?.status === 'trial' ? 'ทดลองใช้ฟรี' : shop?.status === 'active' ? 'ใช้งานอยู่' : (shop?.status ?? '—'),
+            tone: shop?.status === 'active' ? 'ok' : 'default',
+          },
+          {
+            label: 'ใช้ได้ถึง',
+            value: shop?.expires_at
+              ? new Date(shop.expires_at).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })
+              : 'ไม่มีวันหมดอายุ',
+            tone: shop?.expires_at ? 'default' : 'ok',
+          },
+          ...(shopDaysLeft === null
+            ? []
+            : [{
+                label: 'เหลืออีก',
+                value: shopDaysLeft <= 0 ? 'วันสุดท้าย' : `${shopDaysLeft} วัน`,
+                tone: shopDaysLeft <= 7 ? 'default' : 'muted',
+              }]),
+        ]}
+      />
+
+      {isPlatformAdmin && (
+        <SettingCard
+          icon="shield_person"
+          title="แอดมินระบบ"
+          desc="จัดการลูกค้าทุกราย ต่ออายุ ระงับ และดูบันทึกการเข้าถึงข้อมูล"
+          rows={[{ label: 'เห็นเฉพาะบัญชีแอดมิน', value: 'ตั้งได้ที่ฐานข้อมูลเท่านั้น', tone: 'muted' }]}
+          action="เปิดหน้าแอดมิน"
+          onClick={() => navigate('/admin')}
+        />
+      )}
 
       <SettingCard
         icon="backup"

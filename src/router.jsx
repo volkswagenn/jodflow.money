@@ -24,6 +24,8 @@ const HistoryPage = lazyPage(() => import('./pages/History'))
 const ImportPage = lazyPage(() => import('./pages/Import'))
 const BackupPage = lazyPage(() => import('./pages/Backup'))
 const SettingsPage = lazyPage(() => import('./pages/Settings'))
+// หน้าแอดมินระบบ — คนส่วนใหญ่ไม่มีวันเปิด จึงไม่ควรอยู่ใน bundle หลักของทุกคน
+const AdminPage = lazyPage(() => import('./pages/Admin'))
 
 function PageSpinner() {
   return (
@@ -99,6 +101,10 @@ export const router = createHashRouter([
       { path: 'import', element: lazyRoute(ImportPage) },
       { path: 'backup', element: lazyRoute(BackupPage) },
       { path: 'settings', element: lazyRoute(SettingsPage) },
+      // แอดมินระบบ — ตัวหน้าเองเช็ค isPlatformAdmin แล้วเด้งกลับหน้าแรกถ้าไม่ใช่
+      // (ด่านจริงอยู่ที่ RLS/RPC ฝั่งฐานข้อมูล ตรงนี้แค่ไม่ให้เห็นหน้าจอเปล่าๆ)
+      { path: 'admin', element: <Navigate to="/admin/overview" replace /> },
+      { path: 'admin/:tab', element: lazyRoute(AdminPage) },
       { path: '*', element: <Navigate to="/" replace /> },
     ],
   },

@@ -1,4 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
+import { PASSWORD_PROBLEM_TEXT } from './passwordRules'
+import { getSessionToken } from './sessionToken'
 
 // ค่าทั้งสองตัวถูกฝังลงไฟล์ที่เบราว์เซอร์โหลด = เป็นข้อมูลสาธารณะ ไม่ใช่ความลับ
 // ความปลอดภัยจริงอยู่ที่ RLS ใน supabase/policies.sql
@@ -21,12 +23,30 @@ export const configError = (isPlaceholder(url) || isPlaceholder(anonKey))
   ? 'ยังไม่ได้ใส่ค่า Supabase ในไฟล์ .env.local'
   : null
 
+/**
+ * ระบบล็อกอินเป็นของเราเอง (ดู supabase/users.sql หมวด 3) — ไม่ใช้ Supabase Auth
+ *
+ * ตั๋วถูกส่งไปกับทุก request ใน header x-session-token ผ่าน fetch ตัวนี้
+ * ฝั่งฐานข้อมูล pre-request hook อ่าน header → หา session → ตั้ง auth.uid() ให้เป็นคนของเรา
+ * ครอบ fetch แทนการตั้ง global.headers เพราะตั๋วเปลี่ยนได้ระหว่างใช้งาน (ล็อกอิน/ออก)
+ * แต่ client ถูกสร้างครั้งเดียวตอนโหลดไฟล์ — headers คงที่ตามไม่ทัน
+ *
+ * ตัว fetch ตัวเดียวกันนี้ถูกใช้กับ Storage ด้วย — policy ของไฟล์แนบจึงอ่านตั๋วเดียวกัน
+ */
+function fetchWithSession(input, init = {}) {
+  const token = getSessionToken()
+  if (!token) return fetch(input, init)
+  const headers = new Headers(init.headers ?? {})
+  headers.set('x-session-token', token)
+  return fetch(input, { ...init, headers })
+}
+
 export const supabase = createClient(url || 'https://unset.supabase.co', anonKey || 'unset', {
+  global: { fetch: fetchWithSession },
   auth: {
-    persistSession: true,      // ปิดแท็บแล้วเปิดใหม่ยังล็อกอินค้างอยู่
-    autoRefreshToken: true,
-    // แอปใช้ createHashRouter (URL เป็น /#/dashboard) และเราไม่ได้ใช้ลิงก์จากอีเมล
-    // ถ้าเปิดไว้ supabase จะพยายามอ่าน token จาก hash แล้วชนกับ router
+    // ไม่ใช้ Supabase Auth แล้ว — ปิดทุกอย่างที่มันจะแอบทำเอง (อ่าน hash ใน URL · ต่ออายุ JWT)
+    persistSession: false,
+    autoRefreshToken: false,
     detectSessionInUrl: false,
   },
   realtime: {
@@ -73,8 +93,17 @@ export function toThaiError(error) {
     const file = /card|statement|installment|advance/i.test(fn ?? col ?? '') ? 'supabase/card.sql' : 'supabase/check.sql'
     return `ฐานข้อมูลยังไม่มี${what} — เปิด Supabase → SQL Editor วาง ${file} ตัวล่าสุดจาก repo ทับทั้งไฟล์แล้ว Run (ถ้ารันแล้วยังขึ้น แปลว่าไฟล์ในแท็บเป็นตัวเก่า) รันซ้ำได้ ข้อมูลเดิมไม่หาย`
   }
-  if (/Invalid login credentials/i.test(msg)) return 'อีเมลหรือรหัสผ่านไม่ถูกต้อง'
-  if (/Email not confirmed/i.test(msg)) return 'บัญชีนี้ยังไม่ได้ยืนยัน ติดต่อเจ้าของร้าน'
+  // ── ระบบล็อกอินของเราเอง ────────────────────────────────────────────────
+  // PGRST202 = เรียก RPC ที่ยังไม่มี → ยังไม่ได้รัน users.sql ตัวที่มีระบบล็อกอินใหม่
+  if (error.code === 'PGRST202' || /Could not find the function public\.app_/i.test(msg)) {
+    return 'ฐานข้อมูลยังไม่มีระบบล็อกอินตัวใหม่ — เปิด Supabase → SQL Editor วาง supabase/users.sql ตัวล่าสุดทั้งไฟล์แล้ว Run (รันซ้ำได้ ข้อมูลเดิมไม่หาย)'
+  }
+  if (/Password should be at least|weak.?password/i.test(msg)) {
+    return PASSWORD_PROBLEM_TEXT.TOO_SHORT
+  }
+  if (/rate limit|too many requests/i.test(msg)) {
+    return 'ทำรายการถี่เกินไป รอสักครู่แล้วลองใหม่'
+  }
   if (/Failed to fetch|NetworkError|fetch failed/i.test(msg)) {
     return 'ต่ออินเทอร์เน็ตไม่ได้ — ระบบนี้ต้องออนไลน์ตลอดเวลา'
   }

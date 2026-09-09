@@ -30,8 +30,12 @@ export default function DataGate({ children }) {
     setAttempt((n) => n + 1)
   }, [])
 
+  // shopId อยู่ในรายการพึ่งพาด้วย เพราะแอดมินสลับเข้า-ออกร้านลูกค้าได้ระหว่างใช้งาน
+  // ถ้าไม่โหลดใหม่ หน้าจอจะยังเป็นข้อมูลร้านเดิมทั้งที่ api ยิงไปอีกร้านแล้ว
   useEffect(() => {
     let alive = true
+    setStatus('loading')
+    setError(null)
     hydrateStores()
       .then(() => {
         if (!alive) return
@@ -48,7 +52,7 @@ export default function DataGate({ children }) {
     return () => {
       alive = false
     }
-  }, [attempt])
+  }, [attempt, shopId])
 
   if (status === 'loading') {
     return (

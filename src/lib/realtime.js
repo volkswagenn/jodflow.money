@@ -83,17 +83,16 @@ export function subscribeRealtime(shopId, onStatus) {
     }
   }
 
-  const channel = supabase.channel(`shop:${shopId}`)
-  for (const table of Object.keys(TABLE_STORES)) {
-    channel.on(
-      'postgres_changes',
-      { event: '*', schema: 'public', table, filter: `shop_id=eq.${shopId}` },
-      () => {
-        dirty.add(table)
-        if (!timer) timer = setTimeout(flush, DEBOUNCE_MS)
-      }
-    )
-  }
+  // postgres_changes ตรวจสิทธิ์ด้วย JWT ของ Supabase Auth ซึ่งเราเลิกใช้แล้ว (ระบบล็อกอินเป็นของเราเอง)
+  // จึงเปลี่ยนเป็น broadcast จาก trigger ฝั่งฐาน (supabase/users.sql หมวด 12): ส่งมาแค่
+  // "ตาราง X ของร้านนี้เปลี่ยน" ไม่มีตัวข้อมูล แล้วเราดึงใหม่ผ่านทางที่มีสิทธิ์ตามปกติ
+  const channel = supabase.channel(`shop:${shopId}`, { config: { private: false } })
+  channel.on('broadcast', { event: 'change' }, ({ payload }) => {
+    const table = payload?.table
+    if (!table || !TABLE_STORES[table]) return
+    dirty.add(table)
+    if (!timer) timer = setTimeout(flush, DEBOUNCE_MS)
+  })
   channel.subscribe((status) => {
     if (status === 'SUBSCRIBED') onStatus?.('connected')
     else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') onStatus?.('disconnected')

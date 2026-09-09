@@ -1,10 +1,16 @@
+import { useEffect, useState } from 'react'
 import Icon from '../components/shared/Icon'
+import { loadPlatformSettings } from '../lib/api/platform'
 import { useAuth } from './AuthProvider'
 import LoginPage from './LoginPage'
+import SignupPage from './SignupPage'
+import ForgotPasswordPage from './ForgotPasswordPage'
+import ChangePasswordPage from './ChangePasswordPage'
 
-/** หน้าจอเต็มสำหรับสถานะที่ยังเข้าแอปไม่ได้ (โหลดอยู่ / พัง / ยังไม่มีร้าน) */
+/** หน้าจอเต็มสำหรับสถานะที่ยังเข้าแอปไม่ได้ (โหลดอยู่ / พัง / ยังไม่มีร้าน / หมดอายุ) */
 function FullScreen({ icon, tone = 'ink', title, detail, children }) {
-  const toneClass = tone === 'error' ? 'bg-expense-soft text-expense' : 'bg-ink text-lime'
+  const toneClass =
+    tone === 'error' ? 'bg-expense-soft text-expense' : tone === 'warn' ? 'bg-pending-soft text-pending' : 'bg-ink text-lime'
   return (
     <div className="min-h-screen bg-paper flex items-center justify-center px-5 py-10">
       <div className="w-full max-w-[400px] text-center">
@@ -19,8 +25,55 @@ function FullScreen({ icon, tone = 'ink', title, detail, children }) {
   )
 }
 
+const thaiDate = (iso) =>
+  iso
+    ? new Date(iso).toLocaleDateString('th-TH', { day: 'numeric', month: 'long', year: 'numeric' })
+    : null
+
+/**
+ * หน้าจอก่อนล็อกอิน — สลับกันเองด้วย state ไม่ใช่ URL
+ *
+ * เพราะสามหน้านี้อยู่นอก RouterProvider (ดู main.jsx) การใส่ router ซ้อนอีกชั้น
+ * เพื่อสามหน้านี้ทำให้ต้องดูแล router สองตัวที่กติกาไม่เหมือนกัน — ไม่คุ้ม
+ */
+function AuthScreens() {
+  const [view, setView] = useState('login') // login | signup | forgot
+  const [platform, setPlatform] = useState({ trialDays: 14, signupOpen: true, signupNote: null })
+
+  // อ่านค่าตั้งแบบเงียบๆ — ถ้าอ่านไม่ได้ (เน็ตหลุด / ยังไม่ได้รัน users.sql)
+  // ให้ใช้ค่าปริยายไปก่อน ห้ามบล็อกหน้าล็อกอินเพราะเรื่องนี้
+  useEffect(() => {
+    let alive = true
+    loadPlatformSettings()
+      .then((s) => alive && setPlatform(s))
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  if (view === 'signup') {
+    return (
+      <SignupPage
+        onGoLogin={() => setView('login')}
+        trialDays={platform.trialDays}
+        signupNote={platform.signupNote}
+      />
+    )
+  }
+  if (view === 'forgot') return <ForgotPasswordPage onGoLogin={() => setView('login')} />
+
+  return (
+    <LoginPage
+      onGoSignup={() => setView('signup')}
+      onGoForgot={() => setView('forgot')}
+      signupOpen={platform.signupOpen}
+    />
+  )
+}
+
 export default function AuthGate({ children }) {
-  const { status, error, retry, signOut, user } = useAuth()
+  const { status, error, retry, signOut, user, shop, blockReason } = useAuth()
 
   // สถานะตอนติดตั้งครั้งแรก — ยังไม่ได้ใส่ค่า Supabase
   if (status === 'unconfigured') {
@@ -55,7 +108,10 @@ VITE_SUPABASE_ANON_KEY=eyJhbGci...`}
     )
   }
 
-  if (status === 'anon') return <LoginPage />
+  if (status === 'anon') return <AuthScreens />
+
+  // เข้าด้วยรหัสชั่วคราว — ต้องตั้งรหัสของตัวเองก่อน ยังไม่โหลดร้าน ยังไม่เห็นข้อมูลอะไร
+  if (status === 'must-change') return <ChangePasswordPage />
 
   if (status === 'error') {
     return (
@@ -78,12 +134,72 @@ VITE_SUPABASE_ANON_KEY=eyJhbGci...`}
     )
   }
 
+  // ── หมดอายุ / ถูกระงับ / ปิดบัญชี ─────────────────────────────────────────
+  //
+  // ทั้งสามกรณีข้อมูลยังอยู่ครบในฐานข้อมูล ไม่มีอะไรถูกลบ — ต้องเขียนบอกให้ชัด
+  // ไม่งั้นผู้ใช้จะเข้าใจว่าของหายแล้วเลิกใช้ไปเลย ทั้งที่แค่ต่ออายุก็กลับมาเหมือนเดิม
+  if (status === 'blocked') {
+    if (blockReason === 'suspended') {
+      return (
+        <FullScreen
+          icon="pause_circle"
+          tone="warn"
+          title="บัญชีถูกระงับชั่วคราว"
+          detail={shop?.suspend_reason || 'ติดต่อผู้ดูแลระบบเพื่อสอบถามรายละเอียด'}
+        >
+          <p className="text-label text-faint leading-relaxed">
+            ข้อมูลทั้งหมดของคุณยังอยู่ครบ ไม่ได้ถูกลบ พอปลดระงับแล้วจะกลับมาเหมือนเดิมทุกอย่าง
+          </p>
+          <button onClick={retry} className="h-11 rounded-ctl bg-ink text-white text-body font-semibold hover:bg-[#24282F]">
+            ตรวจสอบอีกครั้ง
+          </button>
+          <button onClick={signOut} className="h-11 rounded-ctl border border-hairline text-body text-muted hover:bg-white">
+            ออกจากระบบ
+          </button>
+        </FullScreen>
+      )
+    }
+
+    if (blockReason === 'closed') {
+      return (
+        <FullScreen icon="lock" title="บัญชีนี้ปิดการใช้งานแล้ว" detail="ติดต่อผู้ดูแลระบบหากต้องการเปิดใช้อีกครั้ง">
+          <button onClick={signOut} className="h-11 rounded-ctl border border-hairline text-body text-muted hover:bg-white">
+            ออกจากระบบ
+          </button>
+        </FullScreen>
+      )
+    }
+
+    return (
+      <FullScreen
+        icon="schedule"
+        tone="warn"
+        title={shop?.status === 'trial' ? 'หมดช่วงทดลองใช้ฟรีแล้ว' : 'หมดอายุการใช้งานแล้ว'}
+        detail={
+          shop?.expires_at
+            ? `สิทธิ์ใช้งานสิ้นสุดเมื่อ ${thaiDate(shop.expires_at)} — ติดต่อเราเพื่อต่ออายุ แล้วใช้ต่อได้ทันที`
+            : 'ติดต่อเราเพื่อต่ออายุการใช้งาน'
+        }
+      >
+        <p className="text-label text-faint leading-relaxed">
+          ข้อมูลทั้งหมดของคุณยังอยู่ครบทุกรายการ ไม่ได้ถูกลบ — ต่ออายุเมื่อไหร่ก็กลับมาใช้ต่อจากจุดเดิม
+        </p>
+        <button onClick={retry} className="h-11 rounded-ctl bg-ink text-white text-body font-semibold hover:bg-[#24282F]">
+          ต่ออายุแล้ว — ตรวจสอบอีกครั้ง
+        </button>
+        <button onClick={signOut} className="h-11 rounded-ctl border border-hairline text-body text-muted hover:bg-white">
+          ออกจากระบบ
+        </button>
+      </FullScreen>
+    )
+  }
+
   if (status === 'no-shop') {
     return (
       <FullScreen
         icon="storefront"
-        title="บัญชีนี้ยังไม่ได้ถูกเพิ่มเข้าร้าน"
-        detail={`ล็อกอินสำเร็จแล้วในชื่อ ${user?.email ?? ''} แต่ยังไม่มีสิทธิ์เข้าถึงร้านไหนเลย ติดต่อเจ้าของร้านให้เพิ่มคุณเข้าร้านก่อน`}
+        title="บัญชีนี้ยังไม่มีสมุดบัญชี"
+        detail={`ล็อกอินสำเร็จแล้วในชื่อ ${user?.email ?? ''} แต่ยังไม่มีข้อมูลผูกกับบัญชีนี้ ติดต่อผู้ดูแลระบบเพื่อเปิดให้`}
       >
         <button
           onClick={retry}
