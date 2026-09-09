@@ -1106,20 +1106,23 @@ returns table (
   shop_id uuid, shop_name text, status text, expires_at timestamptz, trial_ends_at timestamptz,
   suspend_reason text, created_at timestamptz,
   owner_id uuid, owner_email text, owner_name text, owner_active boolean, owner_must_change boolean,
+  owner_birth_date date, owner_phone text,
   owner_last_sign_in timestamptz, member_count bigint, tx_count bigint, last_active timestamptz, is_open boolean
 ) language plpgsql security definer set search_path = public, extensions, pg_temp as $fn$
 begin
   perform public.assert_platform_admin();
   return query
   select s.id, s.name, s.status, s.expires_at, s.trial_ends_at, s.suspend_reason, s.created_at,
-         o.id, o.email, coalesce(o.pname, o.display_name), o.is_active, o.must_change_password, o.last_sign_in_at,
+         o.id, o.email, coalesce(o.pname, o.display_name), o.is_active, o.must_change_password,
+         o.birth_date, o.phone, o.last_sign_in_at,
          (select count(*) from shop_members m where m.shop_id = s.id),
          (select count(*) from transactions t where t.shop_id = s.id),
          (select max(l."timestamp") from activity_logs l where l.shop_id = s.id),
          (s.status in ('trial', 'active') and (s.expires_at is null or s.expires_at > now()))
     from shops s
     left join lateral (
-      select u.id, u.email, u.display_name, p.display_name as pname, u.is_active, u.must_change_password, u.last_sign_in_at
+      select u.id, u.email, u.display_name, p.display_name as pname, u.is_active, u.must_change_password,
+             u.birth_date, u.phone, u.last_sign_in_at
         from shop_members m join app_users u on u.id = m.user_id left join profiles p on p.id = u.id
        where m.shop_id = s.id and m.role = 'owner' order by m.created_at limit 1
     ) o on true
@@ -1238,6 +1241,54 @@ begin
 end;
 $fn$;
 
+-- แก้ข้อมูลกู้บัญชีของลูกค้า (ชื่อ · วันเกิด · เบอร์)
+--
+-- ทำไมแอดมินต้องแก้ให้ได้: บัญชีที่ถูกสร้างจาก SQL (เช่นเจ้าของร้านข้อมูลจริงตอนย้ายระบบ)
+-- ข้ามหน้าสมัครไป จึงไม่มีวันเกิด/เบอร์ = กู้รหัสเองไม่ได้ตลอดไป ต้องมีทางเติมให้
+--
+-- ⚠️ ข้อมูลชุดนี้คือ "กุญแจกู้รหัสผ่าน" ของบัญชีนั้น ใครรู้ทั้งคู่ก็ตั้งรหัสใหม่ได้
+--    จึงห้ามเขียนค่าจริงลงไฟล์ใด ๆ ใน repo (repo นี้เป็น public) — กรอกผ่านหน้าจอเท่านั้น
+--    และทุกครั้งที่แอดมินแก้ ถูกบันทึกลง audit log ว่าแก้ของใคร แก้ช่องไหน (ไม่เก็บค่า)
+create or replace function public.admin_set_user_identity(
+  p_user         uuid,
+  p_display_name text default null,
+  p_birth_date   text default null,
+  p_phone        text default null
+) returns void language plpgsql security definer set search_path = public, extensions, pg_temp as $fn$
+declare v_email text; v_birth date; v_phone text;
+begin
+  perform public.assert_platform_admin();
+  select email into v_email from app_users where id = p_user;
+  if v_email is null then raise exception 'ไม่พบบัญชีนี้'; end if;
+
+  if coalesce(btrim(p_birth_date), '') <> '' then
+    v_birth := app_birth_date(p_birth_date);
+    if v_birth is null then raise exception 'วันเกิดไม่ถูกต้อง'; end if;
+  end if;
+  if coalesce(btrim(p_phone), '') <> '' then
+    v_phone := app_norm_phone(p_phone);
+    if v_phone !~ '^0\d{8,9}$' then raise exception 'เบอร์โทรไม่ถูกต้อง (เช่น 0812345678)'; end if;
+  end if;
+
+  update app_users set
+    display_name = coalesce(nullif(btrim(p_display_name), ''), display_name),
+    birth_date   = coalesce(v_birth, birth_date),
+    phone        = coalesce(v_phone, phone),
+    updated_at   = now()
+  where id = p_user;
+  update profiles set display_name = coalesce(nullif(btrim(p_display_name), ''), display_name) where id = p_user;
+
+  -- เก็บแค่ "แก้ช่องไหน" ไม่เก็บค่า — audit log อ่านได้โดยแอดมินทุกคน ไม่ควรมีวันเกิด/เบอร์ซ้ำอยู่ในนั้น
+  insert into admin_audit_log (admin_id, admin_email, shop_id, action, detail)
+  values (public.app_uid(), public.current_admin_email(), null, 'SET_IDENTITY', jsonb_build_object(
+    'user_id', p_user, 'email', v_email,
+    'fields', (select jsonb_agg(f) from unnest(array[
+      case when coalesce(btrim(p_display_name),'') <> '' then 'display_name' end,
+      case when v_birth is not null then 'birth_date' end,
+      case when v_phone is not null then 'phone' end]) f where f is not null)));
+end;
+$fn$;
+
 -- ปิด/เปิดบัญชี — ปิดแล้วล็อกอินไม่ได้ทันที (ตั๋วเดิมถูกเตะ และ pre-request ไม่รับบัญชีที่ปิด)
 create or replace function public.admin_set_user_active(p_user uuid, p_active boolean)
 returns void language plpgsql security definer set search_path = public, extensions, pg_temp as $fn$
@@ -1290,7 +1341,8 @@ grant execute on function public.assert_platform_admin(), public.current_admin_e
   public.admin_log_action(uuid, text, jsonb), public.admin_list_shops(),
   public.admin_set_shop_access(uuid, text, timestamptz, text, boolean), public.admin_extend_shop(uuid, int),
   public.admin_close_reset_request(uuid, text), public.admin_issue_temp_password(uuid, text, boolean),
-  public.admin_set_user_active(uuid, boolean), public.admin_kick_user(uuid), public.admin_overview()
+  public.admin_set_user_active(uuid, boolean), public.admin_kick_user(uuid), public.admin_overview(),
+  public.admin_set_user_identity(uuid, text, text, text)
   to anon, authenticated;
 
 
@@ -1457,6 +1509,7 @@ select * from (
     ('ฟังก์ชัน app_signup',              to_regprocedure('public.app_signup(text,text,text,text,text,text)') is not null),
     ('ฟังก์ชัน app_reset_verify',        to_regprocedure('public.app_reset_verify(text,text,text)') is not null),
     ('ฟังก์ชัน admin_issue_temp_password', to_regprocedure('public.admin_issue_temp_password(uuid,text,boolean)') is not null),
+    ('ฟังก์ชัน admin_set_user_identity', to_regprocedure('public.admin_set_user_identity(uuid,text,text,text)') is not null),
     ('FK profiles → app_users',          exists (select 1 from pg_constraint c join pg_class r on r.oid = c.confrelid
                                                   where c.conname = 'profiles_id_fkey' and r.relname = 'app_users')),
     ('FK shop_members → app_users',      exists (select 1 from pg_constraint c join pg_class r on r.oid = c.confrelid

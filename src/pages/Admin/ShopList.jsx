@@ -6,6 +6,7 @@ import { useAuth } from '../../auth/AuthProvider'
 import { adminKickUser, adminListShops, adminSetUserActive } from '../../lib/api/platform'
 import ShopAccessPopup from './ShopAccessPopup'
 import TempPasswordPopup from './TempPasswordPopup'
+import IdentityPopup from './IdentityPopup'
 import { expiryText, statusTone, statusText, thaiDate, thaiDateTime } from './adminFormat'
 
 const FILTERS = [
@@ -35,6 +36,7 @@ export default function ShopList() {
   // งานกับ "บัญชี" ของเจ้าของร้าน (ระบบล็อกอินของเราเอง) — ยืนยันก่อนทุกอย่าง เพราะมีผลทันทีกับคนที่ใช้อยู่
   const [userAction, setUserAction] = useState(null) // { kind: 'kick'|'disable'|'enable', shop }
   const [tempFor, setTempFor] = useState(null)       // ร้านที่กำลังตั้งรหัสให้ (ป๊อปอัปของตัวเอง)
+  const [identityFor, setIdentityFor] = useState(null) // ร้านที่กำลังแก้ข้อมูลกู้บัญชี
   const [actionError, setActionError] = useState('')
 
   async function runUserAction() {
@@ -175,6 +177,21 @@ export default function ShopList() {
                 {s.ownerId && s.ownerMustChange && (
                   <div className="text-[11.5px] text-pending mt-1">มีรหัสชั่วคราวค้างอยู่ — ลูกค้ายังไม่ได้ตั้งรหัสของตัวเอง</div>
                 )}
+                {/* ข้อมูลกู้บัญชี — ใช้ยืนยันตัวตนตอนลูกค้าโทรมาขอรหัสใหม่ และบอกได้ว่าเขากู้เองได้ไหม */}
+                {s.ownerId && (
+                  <div className="text-[11.5px] mt-1">
+                    {s.ownerBirthDate && s.ownerPhone ? (
+                      <span className="text-faint">
+                        กู้บัญชีเองได้ · เกิด {thaiDate(s.ownerBirthDate)} · โทร {s.ownerPhone}
+                      </span>
+                    ) : (
+                      <span className="text-pending">
+                        ยังไม่มีข้อมูลกู้บัญชี ({[!s.ownerBirthDate && 'วันเกิด', !s.ownerPhone && 'เบอร์'].filter(Boolean).join(' · ')})
+                        — ลืมรหัสแล้วต้องให้เราออกรหัสให้
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="text-[11.5px] text-faint leading-relaxed min-w-[170px]">
@@ -202,6 +219,9 @@ export default function ShopList() {
                 <span className="text-[11.5px] text-faint mr-1">บัญชีเจ้าของ:</span>
                 <button className="btn btn-ghost h-8 px-2.5 text-[12px]" onClick={() => setTempFor(s)}>
                   <Icon name="lock_reset" size={16} /> ตั้งรหัสผ่าน
+                </button>
+                <button className="btn btn-ghost h-8 px-2.5 text-[12px]" onClick={() => setIdentityFor(s)}>
+                  <Icon name="key" size={16} /> ข้อมูลกู้บัญชี
                 </button>
                 <button className="btn btn-ghost h-8 px-2.5 text-[12px]" onClick={() => setUserAction({ kind: 'kick', shop: s })}>
                   <Icon name="devices" size={16} /> ออกจากทุกเครื่อง
@@ -234,6 +254,10 @@ export default function ShopList() {
 
       {tempFor && (
         <TempPasswordPopup shop={tempFor} onClose={() => setTempFor(null)} onDone={reload} />
+      )}
+
+      {identityFor && (
+        <IdentityPopup shop={identityFor} onClose={() => setIdentityFor(null)} onDone={reload} />
       )}
 
       {editing && (

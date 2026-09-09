@@ -72,6 +72,8 @@ export async function adminListShops() {
     ownerName: r.owner_name,
     ownerActive: r.owner_active ?? true,
     ownerMustChange: Boolean(r.owner_must_change),
+    ownerBirthDate: r.owner_birth_date ?? null,
+    ownerPhone: r.owner_phone ?? null,
     ownerLastSignIn: r.owner_last_sign_in ?? null,
     memberCount: Number(r.member_count ?? 0),
     txCount: Number(r.tx_count ?? 0),
@@ -152,6 +154,23 @@ export async function adminSetUserActive(userId, active) {
 /** เตะออกจากทุกเครื่อง — คืนจำนวนตั๋วที่ถูกถอน */
 export async function adminKickUser(userId) {
   return unwrap(supabase.rpc('admin_kick_user', { p_user: userId }))
+}
+
+/**
+ * แก้ข้อมูลกู้บัญชีของลูกค้า (ชื่อ · วันเกิด · เบอร์)
+ *
+ * ใช้กับบัญชีที่ถูกสร้างข้ามหน้าสมัคร (เช่นตอนย้ายระบบ) ซึ่งไม่มีวันเกิด/เบอร์
+ * จึงกู้รหัสเองไม่ได้ — ช่องไหนเว้นว่างคือไม่แตะของเดิม
+ */
+export async function adminSetUserIdentity(userId, { displayName = null, birthDate = null, phone = null } = {}) {
+  await unwrap(
+    supabase.rpc('admin_set_user_identity', {
+      p_user: userId,
+      p_display_name: displayName?.trim() || null,
+      p_birth_date: birthDate || null,
+      p_phone: phone?.trim() || null,
+    })
+  )
 }
 
 /** แก้ค่าตั้งของแพลตฟอร์ม (จำนวนวันทดลอง / เปิด-ปิดรับสมัคร) */
