@@ -55,7 +55,7 @@ function MenuItem({ item, badgeCounts, onNavigate }) {
  */
 export default function Sidebar({ open, onClose }) {
   const navigate = useNavigate()
-  const { profile, user, shop, role, isPlatformAdmin } = useAuth()
+  const { profile, user, shop, role, isPlatformAdmin, signOut } = useAuth()
   const version = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '3.0.0' // eslint-disable-line no-undef
 
   const pendingCount = usePendingStore((s) => s.pendingPayments.filter((p) => p.status === 'pending').length)
@@ -113,11 +113,31 @@ export default function Sidebar({ open, onClose }) {
           ))}
         </nav>
 
+        {/*
+          กล่องผู้ใช้ + ทางออกจากระบบ
+
+          ปุ่มออกจากระบบเคยอยู่ในหน้าตั้งค่า → แผง "จัดการบัญชีและรหัสผ่าน" → ล่างสุด
+          ซึ่งลึกไปสามชั้นและไม่ใช่ที่ที่คนมองหา — ที่ที่คนมองหาคือ "ตรงที่มีชื่อเราอยู่"
+          จึงย้ายมาไว้ติดกับชื่อผู้ใช้ตรงนี้ (ในหน้าตั้งค่ายังมีอยู่เหมือนเดิม ไม่ได้ย้ายออก)
+
+          เขียนเป็นข้อความไม่ใช่ไอคอนเปล่า เพราะไอคอนประตูลูกศรคนอ่านไม่ตรงกันทุกคน
+        */}
         <div className="mt-auto bg-[#1D2027] rounded-ctl px-[13px] py-3">
           <div className="text-[11.5px] text-[#A9AFB7] truncate">
             {displayName} · {ROLE_LABEL[role] ?? 'สมาชิก'}
           </div>
           <div className="text-[10.5px] text-[#5A5F67] mt-1.5">JodFlow v{version}</div>
+
+          <button
+            type="button"
+            onClick={signOut}
+            className="mt-2.5 w-full h-9 rounded-[10px] flex items-center justify-center gap-1.5
+                       text-[12.5px] text-[#A9AFB7] border border-white/[0.08]
+                       hover:bg-expense hover:border-expense hover:text-white transition-colors"
+          >
+            <Icon name="logout" size={17} />
+            ออกจากระบบ
+          </button>
         </div>
       </aside>
     </>
