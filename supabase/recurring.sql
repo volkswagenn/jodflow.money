@@ -15,6 +15,21 @@
 -- ============================================================================
 
 
+-- ── กันรันผิดโปรเจกต์ ──────────────────────────────────────────────────────
+-- ไฟล์นี้ต้องรันในโปรเจกต์ของ JodFlow.money เท่านั้น (URL ลงท้ายด้วย ftpoidvwoeacbpyubbbm)
+-- ถ้าวางผิดแท็บ จะหยุดตรงนี้พร้อมบอกวิธีแก้ แทนที่จะขึ้น error ภาษาอังกฤษที่อ่านแล้วนึกว่าไฟล์เสีย
+
+do $guard$
+begin
+  if to_regclass('public.recurring_items') is null or to_regclass('public.shops') is null then
+    raise exception E'⛔ รันผิดโปรเจกต์\n'
+      '   ฐานข้อมูลนี้ไม่มีตาราง recurring_items / shops จึงไม่ใช่ฐานของ JodFlow.money\n'
+      '   สลับโปรเจกต์ที่แถบซ้ายบนไปโปรเจกต์ JODFLOW (URL ลงท้ายด้วย ftpoidvwoeacbpyubbbm)\n'
+      '   แล้ววางไฟล์นี้ใหม่ — ยังไม่มีอะไรถูกแก้ในฐานข้อมูลนี้';
+  end if;
+end $guard$;
+
+
 
 -- ── รอบเรียกเก็บ: รายเดือน / รายปี ─────────────────────────────────────────
 alter table recurring_items add column if not exists frequency text not null default 'monthly'
