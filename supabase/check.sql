@@ -112,6 +112,8 @@ select * from (
     ('card_installment_entries', 'transfer_account_id', 'card.sql'),
     ('transactions',             'card_statement_id',   'card.sql'),
     ('categories',               'sort_order',          'categories.sql'),
+    ('recurring_entries',        'skipped_at',          'recurring.sql'),
+    ('recurring_entries',        'rolled_at',           'recurring.sql'),
     ('profiles',                 'is_platform_admin',   'users.sql'),
     ('shops',                    'status',              'users.sql'),
     ('shops',                    'expires_at',          'users.sql')

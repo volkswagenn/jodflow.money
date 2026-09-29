@@ -1,4 +1,4 @@
-import { supabase, unwrap } from '../supabase'
+import { supabase, toThaiError, unwrap } from '../supabase'
 import { canEditShop, getShopId } from './context'
 import { fromRow, fromRows, toRow } from './_map'
 import { selectAll } from './_page'
@@ -134,6 +134,27 @@ export async function updateRecurringEntry(id, changes) {
   return fromRow('recurring_entries', await unwrap(
     supabase.from('recurring_entries').update(toRow('recurring_entries', changes)).eq('id', id).select().single()
   ))
+}
+
+/**
+ * ข้ามรอบนี้ — จำวันที่กดข้ามไว้ด้วย เพื่อให้นับถอยหลังไปเดือนถัดไปจากวันที่ข้ามจริง
+ *
+ * ถ้ายังไม่ได้รัน recurring.sql ตัวที่มีคอลัมน์ skipped_at ให้ข้ามได้ตามเดิม
+ * (นับถอยหลังจากวันครบกำหนดแทน) ปุ่มข้ามต้องไม่พังเพราะลำดับการอัปเดตฐานข้อมูล
+ */
+export async function markEntrySkipped(id) {
+  const run = (row) => supabase.from('recurring_entries').update(row).eq('id', id).select().single()
+  let res = await run({ status: 'skipped', skipped_at: new Date().toISOString() })
+  if (res.error && (res.error.code === 'PGRST204' || /skipped_at/.test(res.error.message ?? ''))) {
+    res = await run({ status: 'skipped' })
+  }
+  if (res.error) throw new Error(toThaiError(res.error))
+  return fromRow('recurring_entries', res.data)
+}
+
+/** ไม่รอนับถอยหลัง — ย้ายบิลที่จ่ายแล้ว/ข้ามไปเป็นบิลของเดือนถัดไปทันที */
+export async function rollEntryToNextMonth(id) {
+  return updateRecurringEntry(id, { rolledAt: new Date().toISOString() })
 }
 
 /** ย้อนการจ่ายรอบเดือนหนึ่งรอบ: คืนเงินตามรายจ่ายที่ผูกอยู่ ลบรายจ่าย กลับเป็นยังไม่จ่าย */

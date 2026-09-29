@@ -95,7 +95,18 @@ const useRecurringStore = create((set, get) => ({
     return entry
   },
 
-  markSkipped: async (entryId) => get().updateEntry(entryId, { status: 'skipped' }),
+  markSkipped: async (entryId) => {
+    const entry = await recurringApi.markEntrySkipped(entryId)
+    set((s) => ({ entries: s.entries.map((e) => (e.id === entryId ? { ...e, ...entry } : e)) }))
+    return entry
+  },
+
+  /** ไม่รอนับถอยหลัง — ย้ายบิลที่จ่ายแล้ว/ข้ามไปเป็นบิลของเดือนถัดไปทันที */
+  rollToNextMonth: async (entryId) => {
+    const entry = await recurringApi.rollEntryToNextMonth(entryId)
+    set((s) => ({ entries: s.entries.map((e) => (e.id === entryId ? { ...e, ...entry } : e)) }))
+    return entry
+  },
 
   /**
    * พักการเรียกเก็บ n เดือน

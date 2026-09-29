@@ -1,15 +1,17 @@
 import useCategoryStore from '../../store/useCategoryStore'
-import { isYearly, scheduleLabel, cycleLabel } from '../../lib/recurringSchedule'
+import { isYearly, scheduleLabel, cycleLabel, nextMonthShort, shortThaiDate } from '../../lib/recurringSchedule'
 
 const METHOD_LABELS = { cash: 'เงินสด', transfer: 'โอนเงิน', card: 'บัตรเครดิต', pending: 'ค้างชำระ' }
 
-function StatusBadge({ status }) {
-  if (status === 'paid') return <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">✅ จ่ายแล้ว</span>
-  if (status === 'skipped') return <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">⏭ ข้ามแล้ว</span>
+/** ป้ายสถานะ — จ่ายแล้ว/ข้ามแล้วบอกวันที่ทำด้วย เพราะเป็นจุดเริ่มนับถอยหลัง */
+function StatusBadge({ status, date }) {
+  const on = date ? ` ${date}` : ''
+  if (status === 'paid') return <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">✅ จ่ายแล้ว{on}</span>
+  if (status === 'skipped') return <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">⏭ ข้ามแล้ว{on}</span>
   return <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">⏳ รอจ่าย</span>
 }
 
-export default function RecurringEntryCard({ entry, item, daysLeft, upcoming = false, onPay, onUndoPay, onSkip, onEdit, onDelete, onPause }) {
+export default function RecurringEntryCard({ entry, item, daysLeft, upcoming = false, onPay, onUndoPay, onSkip, onEdit, onDelete, onPause, onRoll }) {
   const { getCategoryName, getCategories } = useCategoryStore()
   const categories = getCategories('expense')
   const cat = categories.find((c) => c.id === item.category)
@@ -21,6 +23,10 @@ export default function RecurringEntryCard({ entry, item, daysLeft, upcoming = f
   const isPaid = entry.status === 'paid'
   const isSkipped = entry.status === 'skipped'
   const isPending = entry.status === 'pending' && !upcoming
+  // จ่ายแล้ว/ข้ามแล้ว = ขีดฆ่าไว้ในเดือนนั้น พร้อมวันที่ทำ และนับถอยหลังไปเป็นบิลเดือนถัดไป
+  const isDone = isPaid || isSkipped
+  const doneDate = shortThaiDate(isPaid ? entry.paidAt : entry.skippedAt)
+  const nextMonth = nextMonthShort(entry.month)
 
   return (
     <div className={`rounded-xl border p-4 transition-colors ${
@@ -33,14 +39,14 @@ export default function RecurringEntryCard({ entry, item, daysLeft, upcoming = f
         {/* Left: info */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap mb-1">
-            <span className="text-sm font-semibold text-gray-800">{item.name}</span>
+            <span className={`text-sm font-semibold ${isDone ? 'text-gray-500 line-through' : 'text-gray-800'}`}>{item.name}</span>
             {upcoming
               ? <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">◷ ยังไม่ถึงรอบ</span>
-              : <StatusBadge status={entry.status} />}
-            {/* เหลืออีกกี่วันจะย้ายไปเป็นรอบเดือนหน้า — มีเวลาไล่เช็คสลิปอีกเท่าไร */}
+              : <StatusBadge status={entry.status} date={isDone ? doneDate : ''} />}
+            {/* นับถอยหลังไปเป็นบิลเดือนถัดไป — บอกเดือนปลายทาง ไม่ใช่แค่ "หายไป" */}
             {daysLeft != null && (
-              <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-income-soft text-income">
-                ย้ายออกอีก {daysLeft} วัน
+              <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-pending-soft text-[#8A5F06] border border-pending-line">
+                อีก {daysLeft} วัน → บิล {nextMonth}
               </span>
             )}
             {isYearly(item) && (
@@ -74,7 +80,7 @@ export default function RecurringEntryCard({ entry, item, daysLeft, upcoming = f
         {/* Right: amount + actions */}
         <div className="flex-shrink-0 text-right">
           {hasAmount ? (
-            <p className={`text-base font-bold tabular-nums ${isPaid ? 'text-emerald-600' : 'text-gray-800'}`}>
+            <p className={`text-base font-bold tabular-nums ${isDone ? 'text-gray-500 line-through' : 'text-gray-800'}`}>
               {entry.amount.toLocaleString('th-TH')}
               <span className="text-xs font-normal text-gray-400"> บาท</span>
             </p>
@@ -141,6 +147,16 @@ export default function RecurringEntryCard({ entry, item, daysLeft, upcoming = f
                   🗑
                 </button>
               </>
+            )}
+            {/* ไม่อยากรอนับถอยหลัง — ย้ายไปเป็นบิลเดือนถัดไปทันที */}
+            {isDone && daysLeft != null && onRoll && (
+              <button
+                onClick={() => onRoll(entry, item)}
+                className="btn btn-accent text-xs py-1 px-3"
+                title={`ย้ายไปเป็นบิลเดือน ${nextMonth} ทันที ไม่ต้องรอนับถอยหลัง`}
+              >
+                ไป {nextMonth} เลย →
+              </button>
             )}
             {isSkipped && (
               <button

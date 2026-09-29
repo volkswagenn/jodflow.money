@@ -51,11 +51,33 @@ function loadKeepDays() {
 /** จำนวนวันเต็มจากวันที่ (ISO) ถึงวันนี้ — ใช้นับอายุของบิลที่จัดการไปแล้ว */
 function daysSince(iso) {
   if (!iso) return 0
-  const then = new Date(String(iso).slice(0, 10) + 'T00:00:00')
+  // วันที่ล้วน (due_date) อ่านเป็นเที่ยงคืนเวลาไทย ส่วน timestamp (paid_at / skipped_at)
+  // ต้องแปลงเป็นวันของเวลาไทยก่อน — ตัดสตริง 10 ตัวแรกของ ISO แบบเดิมได้วันของ UTC
+  // ซึ่งจ่ายตอนตีหนึ่งจะถูกนับเป็นเมื่อวาน แล้วนับถอยหลังขาดไปหนึ่งวัน
+  const s = String(iso)
+  const then = /^\d{4}-\d{2}-\d{2}$/.test(s) ? new Date(`${s}T00:00:00`) : new Date(s)
   if (Number.isNaN(then.getTime())) return 0
+  then.setHours(0, 0, 0, 0)
   const today = new Date()
   today.setHours(0, 0, 0, 0)
-  return Math.floor((today - then) / 86400000)
+  return Math.round((today - then) / 86400000)
+}
+
+/** เวลาที่ "จัดการ" รอบนี้ — จ่ายใช้วันที่จ่าย ข้ามใช้วันที่กดข้าม */
+const handledAt = (e) => (e.status === 'paid' ? e.paidAt : e.skippedAt) ?? null
+
+/**
+ * บิลที่จ่ายแล้ว/ข้ามแล้ว ยังอยู่ในเดือนของมันไหม และเหลืออีกกี่วันจะไปเป็นบิลเดือนถัดไป
+ *
+ * นับจากวันที่จัดการจริง ไม่ใช่วันครบกำหนด (รอบข้ามเก่าที่ไม่มี skipped_at ถึงค่อยใช้วันครบกำหนด)
+ * กด "ไป … เลย" หลังการจัดการครั้งล่าสุด = ย้ายทันทีไม่ต้องรอ — เทียบเวลาไว้ เพราะถ้า
+ * ยกเลิกการจ่ายแล้วจ่ายใหม่ ค่าที่กดไว้ก่อนหน้าต้องไม่มีผลกับการจ่ายครั้งใหม่
+ */
+function doneState(entry, keepDays) {
+  const act = handledAt(entry)
+  if (entry.rolledAt && (!act || new Date(entry.rolledAt) >= new Date(act))) return { gone: true }
+  const age = daysSince(act ?? entry.dueDate)
+  return age >= keepDays ? { gone: true } : { gone: false, age, daysLeft: keepDays - age }
 }
 
 /**
@@ -105,7 +127,7 @@ export default function RecurringPage() {
 
   const {
     items, entries, addItem, updateItem, toggleItem, deleteItem,
-    generateEntries, updateEntry, markSkipped, getPendingCountCurrentMonth, syncPendingEntries,
+    generateEntries, updateEntry, markSkipped, rollToNextMonth, getPendingCountCurrentMonth, syncPendingEntries,
     pauseItem, resumeItem,
     syncEntryFromTransaction,
   } = useRecurringStore()
@@ -171,9 +193,9 @@ export default function RecurringPage() {
   const agedOutIds = new Set()
   for (const x of monthEntries) {
     if (x.entry.status === 'pending') continue
-    const age = daysSince(x.entry.paidAt ?? x.entry.dueDate)
-    if (age < keepDays) doneEntries.push({ ...x, age, daysLeft: keepDays - age })
-    else agedOutIds.add(x.item.id)
+    const st = doneState(x.entry, keepDays)
+    if (st.gone) agedOutIds.add(x.item.id)
+    else doneEntries.push({ ...x, age: st.age, daysLeft: st.daysLeft })
   }
   doneEntries.sort((a, b) => a.age - b.age || a.item.billingDay - b.item.billingDay)
 
@@ -220,9 +242,9 @@ export default function RecurringPage() {
           rows.push({ entry: e, item })
           break
         }
-        const age = daysSince(e.paidAt ?? e.dueDate)
-        if (age < keepDays) {
-          rows.push({ entry: e, item, age, daysLeft: keepDays - age })
+        const st = doneState(e, keepDays)
+        if (!st.gone) {
+          rows.push({ entry: e, item, age: st.age, daysLeft: st.daysLeft })
           break
         }
         m = addMonths(m, 1)
@@ -585,6 +607,24 @@ export default function RecurringPage() {
     }
   }
 
+  /**
+   * ไม่รอนับถอยหลัง — ย้ายบิลที่จ่ายแล้ว/ข้ามไปเป็นบิลของเดือนถัดไปทันที
+   * ไม่แตะเงินและไม่แตะสถานะ แค่จำเวลาที่กดไว้ ประวัติการจ่ายของเดือนนี้จึงอยู่ครบเหมือนเดิม
+   */
+  const handleRoll = async (entry, item) => {
+    setActionError('')
+    try {
+      await rollToNextMonth(entry.id)
+      addLog(buildLogEntry({
+        activityType: 'RECURRING_UPDATE',
+        description: `ย้าย "${item.name}" ไปเป็นบิลเดือนถัดไปทันที (ไม่รอนับถอยหลัง)`,
+        newValue: { recurringEntryId: entry.id, recurringId: item.id, month: entry.month },
+      }))
+    } catch (err) {
+      setActionError(err.message)
+    }
+  }
+
   // แม่แบบที่ถูกซ่อน (ลบไปแล้วแต่ยังมีประวัติจ่าย) ไม่ต้องโผล่ในลิสต์จัดการ
   // แต่ยังต้องอยู่ใน items เพื่อให้รอบที่จ่ายแล้วของเดือนเก่าแสดงชื่อรายการได้
   const activeItems = useMemo(() => items.filter((it) => !it.deleted), [items])
@@ -729,17 +769,17 @@ export default function RecurringPage() {
 
           <SectionHead
             dot="bg-income"
-            title="บิลที่จ่ายแล้ว"
+            title="จ่ายแล้ว / ข้าม"
             month={`${THAI_MONTHS[viewMonth]} ${viewYear + 543}`}
             count={doneEntries.length}
-            total={sumOf(doneEntries)}
+            total={sumOf(doneEntries.filter((x) => x.entry.status === 'paid'))}
             tone="text-income"
             pill="bg-income-soft text-income"
-            note={`เก็บไว้ ${keepDays} วันหลังจ่าย เพื่อไล่เช็คกับสลิป · ครบแล้วจะหายจากหน้านี้ แล้วรอบเดือนหน้าขึ้นมาแทน (ดูย้อนหลังได้ที่ "ประวัติการจ่าย")`}
+            note={`ขีดฆ่าไว้ในเดือนนี้ · นับถอยหลัง ${keepDays} วันจากวันที่จ่ายหรือวันที่กดข้าม · ครบแล้วไปเป็นบิลเดือนถัดไป · ไม่อยากรอ กด "ไป … เลย" (ย้อนดูได้ที่ "ประวัติการจ่าย")`}
           />
           {doneEntries.length === 0 && (
             <p className="text-[12px] text-faint bg-white border border-dashed border-hairline rounded-[11px] py-3.5 text-center">
-              ยังไม่มีบิลที่จ่ายในช่วง {keepDays} วันที่ผ่านมา
+              ยังไม่มีบิลที่จ่ายหรือข้ามในช่วง {keepDays} วันที่ผ่านมา
             </p>
           )}
 
@@ -751,6 +791,7 @@ export default function RecurringPage() {
                 entry={entry}
                 item={item}
                 daysLeft={daysLeft}
+                onRoll={handleRoll}
                 onPay={handlePay}
                 onUndoPay={handleUndoPay}
                 onSkip={handleSkip}
@@ -767,13 +808,13 @@ export default function RecurringPage() {
             <>
               <SectionHead
                 dot="bg-[#A5A199]"
-                title="บิลที่ต้องจ่ายรอบถัดไป"
+                title="บิลของเดือนถัดไป"
                 month={nextMonthsLabel}
                 count={nextEntries.length}
                 total={sumOf(nextEntries)}
                 tone="text-muted"
                 pill="bg-paper text-muted"
-                note={`รอบถัดไปของบิลที่พ้นกำหนดเก็บแล้ว · กดจ่ายล่วงหน้าได้ถ้าบิลมาถึงก่อน · จ่ายรอบไหนแล้วพ้น ${keepDays} วัน รอบถัดไปจะขึ้นมาแทนเอง`}
+                note="บิลที่นับถอยหลังครบแล้ว ย้ายมาเป็นบิลของเดือนถัดไป · จ่ายล่วงหน้าได้ถ้าบิลมาถึงก่อน"
               />
               {nextEntries.map(({ entry, item, daysLeft }) => {
                 const Row = view === 'compact' ? RecurringEntryRow : RecurringEntryCard
@@ -786,6 +827,7 @@ export default function RecurringPage() {
                     // เหมือนยังไม่จ่าย แล้วคนกดจ่ายซ้ำจนเงินออกสองรอบ
                     upcoming={entry.status === 'pending'}
                     daysLeft={daysLeft}
+                    onRoll={handleRoll}
                     onPay={handlePay}
                     onUndoPay={handleUndoPay}
                     onSkip={handleSkip}

@@ -122,6 +122,21 @@ export function addMonths(month, n) {
 
 export const monthFirstDay = (month) => `${month}-01`
 
+/** '6 ก.ย.' ตามเวลาไทย — บอกวันที่จ่าย/วันที่กดข้ามบนแถวที่ขีดฆ่าแล้ว */
+export function shortThaiDate(iso) {
+  if (!iso) return ''
+  const s = String(iso)
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(s) ? new Date(`${s}T00:00:00`) : new Date(s)
+  if (Number.isNaN(d.getTime())) return ''
+  return `${d.getDate()} ${THAI_MONTHS_SHORT[d.getMonth()]}`
+}
+
+/** เดือนถัดจากรอบนี้แบบสั้น เช่น 'ต.ค.' — ใช้บนป้ายนับถอยหลังและปุ่ม "ไป … เลย" */
+export function nextMonthShort(month) {
+  const m = Number(addMonths(month, 1).split('-')[1])
+  return THAI_MONTHS_SHORT[m - 1]
+}
+
 /**
  * รายการนี้ถูกพักอยู่ในเดือนที่ระบุไหม
  * @returns null ถ้าไม่ได้พัก หรือ { resumeMonth, totalMonths, monthsLeft }
