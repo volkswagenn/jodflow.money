@@ -17,7 +17,7 @@ import UiIcon from '../../components/shared/UiIcon'
 import ConfirmPopup from '../../components/shared/ConfirmPopup'
 import RecurringEntryCard from './RecurringEntryCard'
 import RecurringEntryRow from './RecurringEntryRow'
-import { isYearly, pauseInfo, pauseLabel, scheduleLabel } from '../../lib/recurringSchedule'
+import { addMonths, isYearly, occursInMonth, pauseInfo, pauseLabel, scheduleLabel } from '../../lib/recurringSchedule'
 import PausePopup from './PausePopup'
 import RecurringPausedCard from './RecurringPausedCard'
 import { localMonthStr } from '../../lib/dateUtils'
@@ -177,15 +177,86 @@ export default function RecurringPage() {
   }
   doneEntries.sort((a, b) => a.age - b.age || a.item.billingDay - b.item.billingDay)
 
-  const nextEntries = useMemo(() => {
-    if (agedOutIds.size === 0) return []
-    return entries
-      .filter((e) => e.month === nextMonth && agedOutIds.has(e.recurringId))
-      .map((e) => ({ entry: e, item: items.find((it) => it.id === e.recurringId) }))
-      .filter((x) => x.item)
-      .sort((a, b) => a.item.billingDay - b.item.billingDay)
+  /**
+   * หัวข้อที่ 3 — "รอบถัดไปที่ยังต้องสนใจ" ของรายการที่รอบเดือนนี้พ้นกำหนดเก็บแล้ว
+   *
+   * เดินหน้าทีละเดือนจากเดือนถัดไป จนเจอรอบที่ยังมีความหมายกับคนใช้ คือ
+   *   • ยังไม่ได้จ่าย            → แสดงพร้อมปุ่มจ่ายล่วงหน้า
+   *   • เพิ่งจ่าย ยังไม่พ้น keepDays → แสดงว่าจ่ายแล้วและเหลืออีกกี่วันจะเลื่อน
+   * รอบที่จ่ายแล้วและพ้นกำหนดเก็บ ให้ข้ามไปดูรอบถัดไปต่อ
+   *
+   * ของเดิมล็อกไว้ที่ "เดือนที่ดู + 1" เสมอ ⇒ จ่ายล่วงหน้าไปกี่เดือนก็ตาม หัวข้อนี้
+   * ไม่เคยขยับตาม คนจึงเห็นรอบที่จ่ายไปแล้วค้างอยู่ราวกับยังไม่ได้จ่าย
+   *
+   * เดือนที่รายการไม่ได้ออกบิล (รายปีที่ไม่ใช่เดือนเรียกเก็บ · เดือนที่พักอยู่) ข้ามไปเลย
+   * ไม่งั้นจะไปจอดรอ entry ที่ไม่มีวันถูกสร้าง
+   */
+  const MAX_LOOKAHEAD = 12
+  const { nextEntries, missingMonths } = useMemo(() => {
+    if (agedOutIds.size === 0) return { nextEntries: [], missingMonths: [] }
+
+    const byKey = new Map(entries.map((e) => [`${e.recurringId}|${e.month}`, e]))
+    const rows = []
+    const missing = new Set()
+
+    for (const id of agedOutIds) {
+      const item = items.find((it) => it.id === id)
+      if (!item) continue
+
+      let m = nextMonth
+      for (let step = 0; step < MAX_LOOKAHEAD; step++) {
+        const monthNo = Number(m.split('-')[1])
+        if (!occursInMonth(item, monthNo) || pauseInfo(item, m)) {
+          m = addMonths(m, 1)
+          continue
+        }
+        const e = byKey.get(`${id}|${m}`)
+        if (!e) {
+          // ยังไม่ถูกสร้าง — ขอให้สร้างแล้วค่อยแสดงในรอบ render ถัดไป
+          missing.add(m)
+          break
+        }
+        if (e.status === 'pending') {
+          rows.push({ entry: e, item })
+          break
+        }
+        const age = daysSince(e.paidAt ?? e.dueDate)
+        if (age < keepDays) {
+          rows.push({ entry: e, item, age, daysLeft: keepDays - age })
+          break
+        }
+        m = addMonths(m, 1)
+      }
+    }
+
+    rows.sort((a, b) => (a.entry.month < b.entry.month ? -1 : a.entry.month > b.entry.month ? 1 : 0)
+      || a.item.billingDay - b.item.billingDay)
+    return { nextEntries: rows, missingMonths: [...missing].sort() }
     // agedOutIds สร้างใหม่ทุกรอบ render จึงผูก dependency กับสิ่งที่ทำให้มันเปลี่ยนแทน
   }, [entries, items, nextMonth, monthEntries, keepDays]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // รอบของเดือนที่ไกลกว่า "เดือนถัดไป" ถูกสร้างเมื่อต้องใช้จริงเท่านั้น — คนที่ไม่เคยจ่าย
+  // ล่วงหน้าจะไม่มีแถวอนาคตงอกไว้เปล่าๆ ในฐานข้อมูล
+  const missingKey = missingMonths.join(',')
+  useEffect(() => {
+    for (const m of missingMonths) generateEntries(m)
+  }, [missingKey]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  /**
+   * ชื่อเดือนบนหัวข้อที่ 3 — ตอนนี้แต่ละรายการอยู่คนละเดือนได้ (ใครจ่ายล่วงหน้าไปไกล
+   * ก็เลื่อนไปไกลกว่า) จึงบอกเป็นช่วงแทนเดือนเดียว ส่วนเดือนของแต่ละใบอ่านได้จาก
+   * วันครบกำหนดบนแถวนั้นอยู่แล้ว
+   */
+  const nextMonthsLabel = useMemo(() => {
+    const label = (m) => {
+      const [y, mm] = m.split('-').map(Number)
+      return `${THAI_MONTHS[mm - 1]} ${y + 543}`
+    }
+    const months = [...new Set(nextEntries.map((x) => x.entry.month))].sort()
+    if (months.length === 0) return ''
+    if (months.length === 1) return label(months[0])
+    return `${label(months[0])} – ${label(months[months.length - 1])}`
+  }, [nextEntries])
 
   const sumOf = (list) => list.reduce((n, x) => n + (Number(x.entry.amount) || 0), 0)
 
@@ -279,6 +350,15 @@ export default function RecurringPage() {
    */
   const executeMarkPaid = async (entry, item, amount, paidMethod, paidDate = format(new Date(), 'yyyy-MM-dd'), accountId = null, cardId = null, paidAt = null) => {
     if (busy) return
+    // ด่านสุดท้ายกันจ่ายซ้ำ — ทุกเส้นทางที่ตัดเงินจริงผ่านฟังก์ชันนี้ ถ้ารอบนี้จ่ายไปแล้ว
+    // การทำซ้ำคือสร้างรายการจ่ายใบที่สองและตัดเงินออกอีกรอบ ซึ่งตามเก็บทีหลังยาก
+    // (เคยเกิดได้จริงตอนหัวข้อ "รอบถัดไป" แสดงปุ่มจ่ายค้างไว้ทั้งที่จ่ายแล้ว)
+    const fresh = entries.find((e) => e.id === entry.id) ?? entry
+    if (fresh.status !== 'pending') {
+      setActionError(`"${item.name}" รอบนี้บันทึกว่า${fresh.status === 'paid' ? 'จ่ายแล้ว' : 'ข้ามแล้ว'} — ถ้าต้องการแก้ ให้กดยกเลิกการจ่ายก่อน`)
+      setPayTarget(null)
+      return
+    }
     setBusy(true)
     setActionError('')
     try {
@@ -687,22 +767,25 @@ export default function RecurringPage() {
             <>
               <SectionHead
                 dot="bg-[#A5A199]"
-                title="บิลที่ต้องจ่ายเดือนหน้า"
-                month={`${THAI_MONTHS[(viewMonth + 1) % 12]} ${(viewMonth === 11 ? viewYear + 1 : viewYear) + 543}`}
+                title="บิลที่ต้องจ่ายรอบถัดไป"
+                month={nextMonthsLabel}
                 count={nextEntries.length}
                 total={sumOf(nextEntries)}
                 tone="text-muted"
                 pill="bg-paper text-muted"
-                note="รอบของเดือนหน้าที่ขึ้นมาแทนบิลเดือนนี้ซึ่งพ้นกำหนดเก็บแล้ว · กดจ่ายล่วงหน้าได้ถ้าบิลมาถึงก่อน"
+                note={`รอบถัดไปของบิลที่พ้นกำหนดเก็บแล้ว · กดจ่ายล่วงหน้าได้ถ้าบิลมาถึงก่อน · จ่ายรอบไหนแล้วพ้น ${keepDays} วัน รอบถัดไปจะขึ้นมาแทนเอง`}
               />
-              {nextEntries.map(({ entry, item }) => {
+              {nextEntries.map(({ entry, item, daysLeft }) => {
                 const Row = view === 'compact' ? RecurringEntryRow : RecurringEntryCard
                 return (
                   <Row
                     key={entry.id}
                     entry={entry}
                     item={item}
-                    upcoming
+                    // จ่ายไปแล้วต้องแสดงตามสถานะจริงและซ่อนปุ่มจ่าย — ไม่งั้นแถวหน้าตา
+                    // เหมือนยังไม่จ่าย แล้วคนกดจ่ายซ้ำจนเงินออกสองรอบ
+                    upcoming={entry.status === 'pending'}
+                    daysLeft={daysLeft}
                     onPay={handlePay}
                     onUndoPay={handleUndoPay}
                     onSkip={handleSkip}
