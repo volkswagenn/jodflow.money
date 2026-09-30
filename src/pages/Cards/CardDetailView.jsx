@@ -1177,11 +1177,26 @@ export default function CardDetailView({ cardId }) {
             ยอดยกมาตอนเพิ่มบัตรกับการปรับยอดด้วยมือ ซึ่งไม่เคยขึ้นบิลเลยและไม่มีที่ไหนบอก
             ถ้าไม่แสดงไว้ ผู้ใช้จะเจอยอดหนี้ที่จ่ายบิลครบทุกใบแล้วก็ยังไม่เป็นศูนย์ */}
         {Math.abs(unbilledDebt) >= 0.01 && (
-          <div className="bg-paper border border-hairline rounded-[13px] px-3.5 py-2.5 text-[11.5px] text-muted leading-relaxed">
+          <div className={`border rounded-[13px] px-3.5 py-2.5 text-[11.5px] leading-relaxed ${
+            unbilledDebt < 0 ? 'bg-expense-soft border-[#F0C4BE] text-[#A93A2E]' : 'bg-paper border-hairline text-muted'
+          }`}>
             ยอดหนี้ {fmt(debt)} = บิลที่ยังไม่จ่าย <b className="tabular-nums">{fmt(billedUnpaidTotal)}</b>
             {' '}+ ที่ยังไม่เข้าบิล <b className="tabular-nums">{fmt(uncoveredCharges)}</b>
-            {' '}+ <b className="tabular-nums">{fmt(unbilledDebt)}</b> ที่มาจากยอดยกมาตอนเพิ่มบัตรหรือการปรับยอดด้วยมือ
-            {' '}— ก้อนสุดท้ายจะไม่ถูกเรียกเก็บผ่านบิลใบไหน ต้องจ่ายแล้วปรับยอดเอง
+            {unbilledDebt < 0 ? (
+              // ของที่ "ยังไม่เข้าบิล" มากกว่าหนี้จริง = มีรายการที่ถูกเก็บในบิลไปแล้ว (จ่ายแล้วด้วยซ้ำ)
+              // แต่ยังไม่ถูกผูกกับใบ บิลใบถัดไปจะกวาดไปเก็บซ้ำ — ต้องบอกให้ชัดว่าเป็นข้อมูล
+              // ที่ต้องซ่อม ไม่ใช่โยนให้เป็น "ยอดยกมา" ซึ่งเป็นไปไม่ได้เมื่อค่าติดลบ
+              <>
+                {' '}− <b className="tabular-nums">{fmt(-unbilledDebt)}</b> ที่ถูกนับซ้ำ: มีรายการที่อยู่ในบิลที่ออกไปแล้ว
+                (หรือจ่ายแล้ว) แต่ยังไม่ได้ผูกกับใบ ถ้าปล่อยไว้บิลใบถัดไปจะเก็บซ้ำ
+                {' '}— เปิด Supabase แล้วรัน <b>supabase/card.sql</b> ทับในแท็บเดิม จะผูกย้อนหลังให้เอง ไม่แตะยอดเงิน
+              </>
+            ) : (
+              <>
+                {' '}+ <b className="tabular-nums">{fmt(unbilledDebt)}</b> ที่มาจากยอดยกมาตอนเพิ่มบัตรหรือการปรับยอดด้วยมือ
+                {' '}— ก้อนสุดท้ายจะไม่ถูกเรียกเก็บผ่านบิลใบไหน ต้องจ่ายแล้วปรับยอดเอง
+              </>
+            )}
           </div>
         )}
 

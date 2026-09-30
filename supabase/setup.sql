@@ -2988,13 +2988,15 @@ begin
     select * into v_st from card_statements where id = v_entry.st_id;
 
     -- แบบเดียวกับที่ close_card_statement ทำตอนปิดรอบ: รายจ่ายหนึ่งแถว + หนี้บัตรเพิ่ม
+    -- ผูก card_statement_id ตั้งแต่ตอนสร้าง — รายการนี้ถูกบวกเข้ายอดของใบข้างล่างทันที
+    -- ถ้าไม่ผูก บิลใบถัดไปจะเห็นว่ายังไม่มีใบไหนเก็บ แล้วกวาดไปเก็บซ้ำอีกรอบ
     insert into transactions (
       shop_id, date, type, amount, method, category_id, item_name, vendor,
-      card_id, installment_entry_id, note, created_by
+      card_id, installment_entry_id, card_statement_id, note, created_by
     ) values (
       v_ins.shop_id, v_st.period_end, 'expense', v_entry.amount, 'card', v_ins.category_id,
       v_ins.name || ' (งวด ' || v_entry.seq || '/' || v_ins.months || ')',
-      v_ins.vendor, v_ins.card_id, v_entry.id,
+      v_ins.vendor, v_ins.card_id, v_entry.id, v_st.id,
       'งวดผ่อนที่เพิ่มเข้าบิลรอบที่ออกไปแล้ว', auth.uid()
     ) returning * into v_tx;
     perform apply_wallet_effect(v_ins.shop_id, 'card:' || v_ins.card_id, -v_entry.amount);
@@ -3891,13 +3893,15 @@ begin
     select * into v_st from card_statements where id = v_entry.st_id;
 
     -- แบบเดียวกับที่ close_card_statement ทำตอนปิดรอบ: รายจ่ายหนึ่งแถว + หนี้บัตรเพิ่ม
+    -- ผูก card_statement_id ตั้งแต่ตอนสร้าง — รายการนี้ถูกบวกเข้ายอดของใบข้างล่างทันที
+    -- ถ้าไม่ผูก บิลใบถัดไปจะเห็นว่ายังไม่มีใบไหนเก็บ แล้วกวาดไปเก็บซ้ำอีกรอบ
     insert into transactions (
       shop_id, date, type, amount, method, category_id, item_name, vendor,
-      card_id, installment_entry_id, note, created_by
+      card_id, installment_entry_id, card_statement_id, note, created_by
     ) values (
       v_ins.shop_id, v_st.period_end, 'expense', v_entry.amount, 'card', v_ins.category_id,
       v_ins.name || ' (งวด ' || v_entry.seq || '/' || v_ins.months || ')',
-      v_ins.vendor, v_ins.card_id, v_entry.id,
+      v_ins.vendor, v_ins.card_id, v_entry.id, v_st.id,
       'งวดผ่อนที่เพิ่มเข้าบิลรอบที่ออกไปแล้ว', auth.uid()
     ) returning * into v_tx;
     perform apply_wallet_effect(v_ins.shop_id, 'card:' || v_ins.card_id, -v_entry.amount);
@@ -4853,10 +4857,27 @@ notify pgrst, 'reload schema';
 -- ยิ่งถ้าใบนั้นจ่ายครบแล้ว หน้าจอจะขึ้นว่า "จ่ายแล้ว" ให้ด้วยทั้งที่ยังไม่ได้จ่ายสักบาท
 --
 -- ตั้งแต่นี้ไปตอนปิดรอบจะผูกรายการกับใบให้เลย (ส่วนที่ 6) ตรงนี้คือการผูกย้อนหลัง
--- ให้ข้อมูลเดิม โดยเอาเฉพาะรายการที่ "มีอยู่ก่อนใบนั้นปิด" เท่านั้น เพราะนั่นคือชุดที่
--- ถูกนับรวมในยอดของใบจริงๆ ส่วนที่คีย์เข้ามาทีหลังไม่เคยถูกนับ — ปล่อยให้ว่างไว้
--- บิลใบถัดไปจะกวาดไปเก็บเองตามกฎใหม่
+-- ให้ข้อมูลเดิม ยึดหลักเดียว: ผูกเฉพาะรายการที่ "ถูกบวกเข้ายอดของใบไปแล้วจริง"
+-- ส่วนที่ไม่เคยถูกนับ ปล่อยให้ว่างไว้ บิลใบถัดไปจะกวาดไปเก็บเองตามกฎใหม่
+--
+-- มีสองทางที่รายการเข้าไปอยู่ในยอดของใบ ต้องผูกให้ครบทั้งสอง (รอบแรกของแพตช์นี้
+-- ผูกแค่ทางที่ 2 ผลคือค่างวดที่ถูกเติมเข้าบิลทีหลังหลุดจากใบ หน้าจอขึ้น "บิลใบนี้
+-- ไม่มีรายการ" ทั้งที่ยอดบิลมีค่างวดอยู่ และบิลใบถัดไปเตรียมจะเก็บซ้ำ)
 
+-- ── 18.1 ค่างวดผ่อนที่ถูกเติมเข้าใบทีหลัง ──
+-- attach_installment_to_closed_statements สร้างรายจ่ายของงวดแล้วบวกเข้ายอดใบตรงๆ
+-- (เกิดหลังใบปิด created_at จึงเลยเวลาปิดไป) ใบที่มันสังกัดอยู่ที่ตารางงวด — ใช้ตรงนั้นผูก
+update transactions t
+   set card_statement_id = e.statement_id
+  from card_installment_entries e
+ where e.transaction_id = t.id
+   and e.statement_id is not null
+   and t.card_statement_id is null;
+
+-- ── 18.2 รายการที่มีอยู่ตอนปิดรอบ ──
+-- ปิดรอบรวมทุกรายการที่มีอยู่ ณ ตอนนั้น (created_at <= closed_at) เข้าใบ ที่คีย์เข้ามา
+-- ทีหลังไม่ได้ถูกนับ — และไม่มีอะไรบวกให้ทีหลังด้วย เพราะ trigger ปรับยอดใบทำงาน
+-- เฉพาะกับรายการที่ผูกใบอยู่แล้ว (แก้ยอด/ลบ) ไม่ทำงานตอนเพิ่มรายการใหม่
 update transactions t
    set card_statement_id = (
      select s.id from card_statements s
@@ -4877,11 +4898,17 @@ update transactions t
 
 notify pgrst, 'reload schema';
 
--- ตรวจผล: ต้องไม่เหลือรายการที่ "อยู่ในช่วงของใบที่ปิดไปแล้วตั้งแต่ก่อนมันเกิด"
--- แต่ยังไม่ถูกผูกกับใบ · ส่วนรายการที่คีย์ย้อนหลังทีหลังจะขึ้นเป็น "รอเข้าบิลใบหน้า"
+-- ตรวจผล: สองบรรทัดที่ต้องเป็น 0 คือของที่ "อยู่ในยอดใบแล้วแต่ยังไม่ผูก" ถ้าไม่เป็น 0
+-- บิลใบถัดไปจะเก็บซ้ำ · ส่วน "ยังไม่เข้าบิล" คือรายการที่คีย์ย้อนหลังทีหลัง รอบิลใบหน้าเก็บ
 select 'ผูกรายการกับใบแล้ว' as "รายการ",
        count(*)::text || ' รายการ' as "ผล"
   from transactions where card_statement_id is not null
+union all
+select 'ค่างวดที่อยู่ในใบแล้วแต่ยังไม่ผูก (ต้องเป็น 0)',
+       count(*)::text || ' รายการ'
+  from transactions t
+  join card_installment_entries e on e.transaction_id = t.id
+ where e.statement_id is not null and t.card_statement_id is null
 union all
 select 'ยังไม่เข้าบิล (บิลใบหน้าจะเก็บให้)',
        count(*)::text || ' รายการ'
