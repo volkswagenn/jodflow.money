@@ -283,6 +283,14 @@ export default function CardDetailView({ cardId }) {
     [statements, isPayableStatement]
   )
   const bill = unpaid[0] ?? null
+  // บิลที่ย้ายรายการเข้าไปได้ — รวมบิลเปล่าที่ระบบตั้งว่าจ่ายแล้วเพราะยอด 0 (ดู store)
+  const attachable = useMemo(
+    () => useCreditCardStore.getState().getAttachableStatements(cardId),
+    [statements, cardId] // eslint-disable-line react-hooks/exhaustive-deps
+  )
+  // ใบที่ควรรับรายการนี้ — ใบที่วันที่รูดตกอยู่ในรอบของมันก่อน ไม่มีค่อยเป็นใบที่ครบกำหนดก่อน
+  const attachTargetFor = (r) =>
+    attachable.find((s) => r.date >= s.periodStart && r.date <= s.periodEnd) ?? attachable[0] ?? null
 
   /**
    * ยอดที่จ่ายบิลใบนี้ไปแล้ว แต่ยังไม่ได้ระบุว่าเป็นค่าของบรรทัดไหน
@@ -740,7 +748,7 @@ export default function CardDetailView({ cardId }) {
             desc: 'ออกจากบิลใบนี้',
             onClick: () => run(() => moveToNext(r)),
           }]
-          : unpaid.map((s) => ({
+          : attachable.map((s) => ({
             icon: 'receipt_long',
             label: 'ย้ายไปรอบบิลนี้',
             desc: `ครบกำหนด ${formatIsoThai(s.dueDate)}`,
@@ -1426,17 +1434,20 @@ export default function CardDetailView({ cardId }) {
                     )}
                     {/* ปุ่มย้ายรอบบิล — เห็นได้เลยไม่ต้องเปิดเมนู เพราะเป็นงานที่ทำตอนไล่บิล
                         ทีละบรรทัด งวดผ่อนไม่มีปุ่ม (ตารางงวดกำหนดเอง) */}
+                    {/* แท็บรอบบิลหน้าเช็คจาก attachable ไม่ใช่ hasBill — บัตรที่บิลล่าสุดเป็นบิลเปล่า
+                        (ยอด 0 ถูกตั้งว่าจ่ายแล้ว) ไม่มี "บิลค้าง" แต่ยังต้องย้ายรายการเข้าใบนั้นได้ */}
+                    {billTab === 'next' && r.tx && !r.tx.installmentEntryId && attachTargetFor(r) && (
+                      <button
+                        disabled={busy}
+                        onClick={() => run(() => moveToBill(r, attachTargetFor(r)))}
+                        className="text-[10.5px] text-[#A93A2E] underline hover:no-underline whitespace-nowrap disabled:opacity-50"
+                        title={`ธนาคารเก็บรายการนี้ในบิลที่ครบกำหนด ${formatIsoThai(attachTargetFor(r).dueDate)} — ย้ายเข้าไปให้ยอดบิลตรง`}
+                      >
+                        ย้ายไปรอบบิลนี้
+                      </button>
+                    )}
                     {hasBill && r.tx && !r.tx.installmentEntryId && (
-                      billTab === 'next' ? (
-                        <button
-                          disabled={busy}
-                          onClick={() => run(() => moveToBill(r, bill))}
-                          className="text-[10.5px] text-[#A93A2E] underline hover:no-underline whitespace-nowrap disabled:opacity-50"
-                          title={`ธนาคารเก็บรายการนี้ในบิลที่ครบกำหนด ${formatIsoThai(bill.dueDate)} — ย้ายเข้าไปให้ยอดบิลตรง`}
-                        >
-                          ย้ายไปรอบบิลนี้
-                        </button>
-                      ) : (
+                      billTab === 'next' ? null : (
                         <button
                           disabled={busy || !bill}
                           onClick={() => run(() => moveToNext(r))}

@@ -119,7 +119,6 @@ export default function ExpenseForm({ onPreviewChange, lockCardId = null, onSave
   const refreshCards = useCreditCardStore((s) => s.refresh)
   const createInstallment = useCreditCardStore((s) => s.createInstallment)
   const cards = useCreditCardStore((s) => s.cards)
-  const getUnpaidStatements = useCreditCardStore((s) => s.getUnpaidStatements)
   const attachTxToStatement = useCreditCardStore((s) => s.attachTransactionToStatement)
   const createDebt = useDebtStore((s) => s.createDebt)
 
@@ -406,7 +405,7 @@ export default function ExpenseForm({ onPreviewChange, lockCardId = null, onSave
     // ผู้ใช้บอกว่ารายการนี้อยู่ในบิลใบที่ออกไปแล้ว — ใส่เข้าใบนั้น ยอดบิลบวกเพิ่มทันที
     // ทำหลังบันทึกรายการเสร็จ ถ้าล้มตรงนี้ รายการยังอยู่ (savedRef) กดบันทึกซ้ำจะมาต่อที่นี่
     if (tx && cardId && billChoiceRef.current) {
-      const target = getUnpaidStatements().find((s) => s.id === billChoiceRef.current)
+      const target = useCreditCardStore.getState().statements.find((s) => s.id === billChoiceRef.current)
       await attachTxToStatement(tx.id, billChoiceRef.current)
       setSavedNote(
         target
@@ -515,7 +514,8 @@ export default function ExpenseForm({ onPreviewChange, lockCardId = null, onSave
     // ยอดผ่อนไม่ถาม เพราะงวดถูกวางลงบิลตามตารางของมันเองอยู่แล้ว
     if (form.method === 'card' && !form.installment && billChoiceRef.current === undefined) {
       const cid = resolveCard(form.cardId)
-      const issued = getUnpaidStatements().filter((s) => s.cardId === cid)
+      // รวมบิลเปล่า (ยอด 0 ที่ระบบตั้งว่าจ่ายแล้ว) ด้วย ไม่งั้นบัตรที่ไม่ได้รูดทั้งรอบจะไม่ถูกถามเลย
+      const issued = useCreditCardStore.getState().getAttachableStatements(cid)
       if (issued.length > 0) return setBillPick({ statements: issued })
     }
 

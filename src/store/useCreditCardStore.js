@@ -459,6 +459,26 @@ const useCreditCardStore = create((set, get) => ({
     return !!card && !card.deleted
   },
 
+  /**
+   * บิลที่ใส่รายการรูดเพิ่มได้ ของบัตรใบหนึ่ง — ใบที่ยังจ่ายไม่ครบ บวก "บิลเปล่า"
+   *
+   * บิลเปล่า = ปิดรอบตอนที่ยังไม่มีรายการ ยอด 0 จึงถูกตั้งเป็นจ่ายแล้วเอง ทั้งที่ไม่มีเงิน
+   * ออกไปสักบาท ถ้าตัดใบพวกนี้ทิ้งเหมือนบิลที่จ่ายจริง รายการที่คีย์ตามบิลธนาคารทีหลัง
+   * จะเข้าใบที่ถูกไม่ได้เลย และไหลไปรอบหน้าเงียบๆ (เจอกับบัตรที่ไม่ได้รูดทั้งรอบ)
+   * เอาเฉพาะใบที่ยังไม่เลยวันครบกำหนด ไม่งั้นบิลศูนย์บาททุกเดือนที่ผ่านมาจะโผล่มาให้เลือกหมด
+   */
+  getAttachableStatements: (cardId) => {
+    const today = toDateString(new Date())
+    return get().statements
+      .filter((s) => s.cardId === cardId && (
+        get().isPayableStatement(s) || (
+          s.status === 'paid' && !s.carriedTo &&
+          Number(s.paidAmount || 0) === 0 && s.dueDate >= today
+        )
+      ))
+      .sort((a, b) => (a.dueDate < b.dueDate ? -1 : 1))
+  },
+
   /** ใบที่ยังจ่ายไม่ครบ ทั้งร้าน เรียงตามวันครบกำหนด */
   getUnpaidStatements: () =>
     get().statements

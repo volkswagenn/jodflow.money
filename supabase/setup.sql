@@ -3154,7 +3154,10 @@ begin
   if v_tx.card_id is null or v_tx.card_id <> v_st.card_id then
     raise exception 'รายการนี้ไม่ได้รูดกับบัตรใบเดียวกับบิล';
   end if;
-  if v_st.status = 'paid' then
+  -- บิลเปล่า (ปิดรอบตอนไม่มีรายการ ยอด 0 เลยถูกตั้งว่าจ่ายแล้วเอง) ไม่เคยมีเงินจ่ายเข้าสักบาท
+  -- จึงไม่มีอะไรให้ย้อน — ต้องรับรายการที่คีย์ตามบิลธนาคารทีหลังได้ ไม่งั้นรายการจะเข้า
+  -- ใบที่ถูกไม่ได้เลย · apply_statement_delta ข้างล่างเปลี่ยนสถานะกลับเป็นค้างจ่ายให้เอง
+  if v_st.status = 'paid' and v_st.paid_amount > 0 then
     raise exception 'บิลใบนี้จ่ายจบแล้ว ใส่รายการเพิ่มไม่ได้ — ย้อนการจ่ายก่อน';
   end if;
   if v_tx.card_statement_id is not distinct from p_statement then return; end if;
