@@ -25,6 +25,7 @@ import EditTransactionPopup from '../../components/shared/EditTransactionPopup'
 import { cancelTransaction as cancelTx, describeTxCancelEffects } from '../../lib/transactionActions'
 import PayInstallmentPopup from '../Recurring/PayInstallmentPopup'
 import InstallmentFormPopup from '../../components/shared/InstallmentFormPopup'
+import InstallmentHistoryPopup from '../../components/shared/InstallmentHistoryPopup'
 import RowMenu from '../../components/shared/RowMenu'
 import EntryPips from '../../components/shared/EntryPips'
 import { MONTHS_TH } from '../Manage/CardFormPopup'
@@ -89,6 +90,13 @@ export default function CardDetailView({ cardId }) {
   const advances = useCreditCardStore((s) => s.getAdvances(cardId))
   const usage = useCreditCardStore((s) => s.getCardLimitUsage(cardId))
   const installments = useCreditCardStore((s) => s.getActiveInstallments(cardId))
+  const allInstallments = useCreditCardStore((s) => s.installments)
+  const doneInstallments = useMemo(
+    () => allInstallments.filter((i) => i.cardId === cardId && i.status === 'completed'),
+    [allInstallments, cardId]
+  )
+  const [showDoneIns, setShowDoneIns] = useState(false)
+  const [historyIns, setHistoryIns] = useState(null)
   const allEntries = useCreditCardStore((s) => s.entries)
   const rowMarks = useCreditCardStore((s) => s.rowMarks)
   const markRow = useCreditCardStore((s) => s.markRow)
@@ -606,7 +614,13 @@ export default function CardDetailView({ cardId }) {
           danger: true,
           onClick: () => setUndoPrepayTarget(r),
         }] : []),
-        {
+        // ค่างวดผ่อน: ยอด/วันที่ถูกกำหนดโดยสัญญา แก้ที่รายการไม่ได้ — พาไปแก้ที่สัญญาแทน
+        r.tx.installmentEntryId && ins ? {
+          icon: 'credit_card',
+          label: 'เปิดรายการผ่อน',
+          desc: 'ดู/แก้ยอด จำนวนงวด',
+          onClick: () => setInsForm({ installment: ins }),
+        } : {
           icon: 'edit_note',
           label: 'แก้ไขรายการ',
           desc: 'ยอด วันที่ หมวดหมู่',
@@ -1236,6 +1250,15 @@ export default function CardDetailView({ cardId }) {
                             (x) => x.status !== 'paid' && x.status !== 'prepaid' && entryPaidViaBill.has(x.id)
                           ).length} จาก {insEntry.i.months} งวด
                         </span>
+                        {/* ทางกลับไปหาต้นทาง — ยอดต่องวดผิดต้องแก้ที่สัญญา ไม่ใช่ที่รายการในบิล
+                            (รายการค่างวดแก้ยอดตรงๆ ไม่ได้ ฐานข้อมูลกันไว้) */}
+                        <button
+                          type="button"
+                          onClick={() => setInsForm({ installment: insEntry.i })}
+                          className="text-[10.5px] text-ink underline hover:no-underline whitespace-nowrap"
+                        >
+                          เปิดรายการผ่อน
+                        </button>
                       </span>
                     )}
                   </span>
@@ -1511,6 +1534,30 @@ export default function CardDetailView({ cardId }) {
               </div>
             )
           })}
+          {/* ผ่อนจบแล้วยังต้องย้อนดูได้ที่บัตรใบเดิม — เดิมพองวดสุดท้ายถูกเก็บ สัญญาหายไป
+              จากหน้านี้เลย เหลือแค่ในหน้าหนี้สินและงวดผ่อนซึ่งคนไม่รู้ว่าต้องไปหาที่นั่น */}
+          {doneInstallments.length > 0 && (
+            <div className="border-t border-[#F6F4EF] pt-2.5 mt-2.5">
+              <button
+                className="text-[11.5px] text-muted hover:text-ink"
+                onClick={() => setShowDoneIns((v) => !v)}
+              >
+                {showDoneIns ? '▲ ซ่อนที่ผ่อนจบแล้ว' : `▼ ผ่อนจบแล้ว ${doneInstallments.length} รายการ`}
+              </button>
+              {showDoneIns && doneInstallments.map((i) => (
+                <div key={i.id} className="flex items-baseline gap-2 mt-1.5">
+                  <span className="flex-1 min-w-0 text-[12px] truncate">{i.name}</span>
+                  <span className="flex-none text-[11px] text-faint tabular-nums">{i.months} งวด · {fmt(i.totalAmount)}</span>
+                  <button
+                    className="flex-none text-[11px] text-ink underline hover:no-underline"
+                    onClick={() => setHistoryIns(i)}
+                  >
+                    ประวัติการผ่อน
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="card px-[15px] py-3.5">
@@ -1579,6 +1626,7 @@ export default function CardDetailView({ cardId }) {
       )}
       {editingTx && <EditTransactionPopup transaction={editingTx} onClose={() => setEditingTx(null)} />}
 
+      {historyIns && <InstallmentHistoryPopup installment={historyIns} onClose={() => setHistoryIns(null)} />}
       {insForm && (
         <InstallmentFormPopup
           installment={insForm.installment}

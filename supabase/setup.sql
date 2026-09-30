@@ -3791,6 +3791,8 @@ declare
   v_ins    card_installments;
   v_e      jsonb;
   v_locked int;
+  v_b      record;
+  v_sts    uuid[] := '{}';
 begin
   select * into v_ins from card_installments where id = p_installment;
   if not found then raise exception 'ไม่พบรายการผ่อนนี้'; end if;
@@ -3815,13 +3817,50 @@ begin
     return v_ins;
   end if;
 
-  -- ตั้งแต่บรรทัดนี้ลงไปคือแก้ทั้งแผน ต้องไม่มีงวดไหนเกิดขึ้นจริงไปแล้ว
+  -- ตั้งแต่บรรทัดนี้ลงไปคือแก้ทั้งแผน ต้องไม่มีงวดไหน "จ่ายไปแล้ว"
+  --
+  -- งวดที่เข้าบิลแล้วแต่บิลใบนั้นยังไม่มีเงินจ่ายเข้าสักบาท ยังไม่ใช่เงินที่ออกไปจริง
+  -- แก้ได้ — ตัวอย่างที่เจอ: กรอกราคาผิด (2,695 แทน 26,950) ค่างวดที่เข้าบิลไปแล้ว
+  -- เลยผิดตาม ถ้ายังล็อกไว้ ทางเดียวคือลบสัญญาทิ้งแล้วสร้างใหม่
+  -- ที่ยังล็อก: จ่ายผ่านแอปแล้ว · อยู่ในบิลที่จ่ายแล้ว (ครบหรือบางส่วน) · จ่ายรายการนั้นไว้แล้ว
   select count(*) into v_locked
-    from card_installment_entries
-   where installment_id = p_installment and status in ('billed', 'paid');
+    from card_installment_entries e
+    left join card_statements s on s.id = e.statement_id
+   where e.installment_id = p_installment
+     and (e.status = 'paid'
+          or (e.status = 'billed' and (
+                s.id is null or s.status = 'paid' or s.paid_amount > 0
+                or exists (select 1 from card_statement_payments p
+                            where p.transaction_id = e.transaction_id))));
   if v_locked > 0 then
-    raise exception 'มีงวดที่เรียกเก็บหรือจ่ายไปแล้ว % งวด แก้จำนวนงวดหรือยอดต่องวดไม่ได้ — ย้อนงวดที่จ่ายไว้ก่อน', v_locked;
+    raise exception 'มีงวดที่จ่ายไปแล้ว % งวด (จ่ายค่างวดผ่านแอป หรืออยู่ในบิลที่จ่ายแล้ว) แก้จำนวนงวดหรือยอดต่องวดไม่ได้ — ย้อนการจ่ายก่อน', v_locked;
   end if;
+
+  -- ถอนงวดที่เข้าบิลแล้วออกจากบิลก่อน: ลบรายจ่ายของงวด (trigger หักยอดบิลให้เอง)
+  -- แล้วคืนหนี้บัตร — ตารางใหม่ข้างล่างจะเติมกลับเข้าบิลใบเดิมด้วยยอดใหม่
+  -- ต้องทำก่อนเปลี่ยน card_id ของสัญญา หนี้ที่คืนต้องคืนให้บัตรใบเดิมที่ถูกรูด
+  perform set_config('jodflow.installment_rpc', '1', true);
+  for v_b in
+    select t.id, t.amount, t.card_id, t.card_statement_id, e.statement_id as entry_statement
+      from card_installment_entries e
+      join transactions t on t.id = e.transaction_id
+     where e.installment_id = p_installment and e.status = 'billed'
+  loop
+    delete from transactions where id = v_b.id;
+    perform apply_wallet_effect(v_ins.shop_id, 'card:' || v_b.card_id, v_b.amount);
+    if v_b.card_statement_id is not null then
+      v_sts := array_append(v_sts, v_b.card_statement_id);
+    elsif v_b.entry_statement is not null then
+      -- รายการที่ยังไม่ได้ผูกใบ (ข้อมูลก่อน card.sql ส่วนที่ 18) trigger ไม่รู้ว่าต้องหักใบไหน
+      perform apply_statement_delta(v_b.entry_statement, -v_b.amount, 0);
+      v_sts := array_append(v_sts, v_b.entry_statement);
+    end if;
+  end loop;
+  perform set_config('jodflow.installment_rpc', '', true);
+  -- บิลที่เหลือยอด 0 หลังถอน apply_statement_delta ตั้งเป็น "จ่ายแล้ว" ให้เอง ซึ่งจะทำให้
+  -- ตัวเติมงวดข้ามใบนี้ไป (เติมเฉพาะใบที่ยังไม่จ่าย) — เปิดกลับไว้ก่อน ค่อยคิดสถานะใหม่ตอนท้าย
+  update card_statements set status = 'closed'
+   where id = any(v_sts) and status = 'paid' and paid_amount = 0;
 
   if jsonb_array_length(coalesce(p_entries, '[]'::jsonb)) = 0 then
     raise exception 'ต้องมีอย่างน้อยหนึ่งงวด';
@@ -3864,6 +3903,9 @@ begin
 
   -- งวดที่ตกในรอบที่ออกบิลไปแล้ว เติมเข้าบิลใบนั้นทันที (ดูส่วนที่ 12)
   perform attach_installment_to_closed_statements(v_ins.id);
+  -- บิลที่ถอนงวดออกแล้วไม่ได้เติมกลับ (เช่นเลื่อนวันซื้อจนงวดย้ายรอบ) ยอด 0 = จ่ายแล้วตามเดิม
+  update card_statements set status = 'paid'
+   where id = any(v_sts) and status <> 'paid' and amount - paid_amount <= 0;
 
   perform write_log(v_ins.shop_id, p_log);
   return v_ins;

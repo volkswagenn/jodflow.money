@@ -99,11 +99,32 @@ export default function InstallmentFormPopup({ installment = null, cardId = '', 
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }))
 
-  // งวดที่เกิดขึ้นจริงไปแล้ว = แผนถูกล็อก แก้ได้แค่ข้อมูลอธิบาย
-  const lockedCount = useMemo(() => {
-    if (!isEdit) return 0
-    return getEntries(installment.id).filter((e) => e.status === 'billed' || e.status === 'paid').length
-  }, [isEdit, installment, getEntries])
+  const statementPayments = useCreditCardStore((s) => s.statementPayments)
+
+  /**
+   * งวดที่ "จ่ายไปแล้ว" = แผนถูกล็อก แก้ได้แค่ข้อมูลอธิบาย
+   *
+   * งวดที่แค่เข้าบิลแต่บิลใบนั้นยังไม่มีเงินจ่ายเข้าไม่นับ — ยังไม่มีเงินออกไปจริง แก้แผนแล้ว
+   * ฐานข้อมูลถอนงวดออกจากบิลแล้วเติมกลับด้วยยอดใหม่ให้ (update_card_installment)
+   * เคยล็อกตั้งแต่เข้าบิล ผลคือกรอกราคาผิดแล้วแก้ไม่ได้เลยทันทีที่ถึงวันสรุปยอด
+   * กฎชุดเดียวกับฝั่งฐานข้อมูล: จ่ายผ่านแอป · อยู่ในบิลที่จ่ายแล้ว (ครบ/บางส่วน) · จ่ายรายการนั้นไว้
+   */
+  const { lockedCount, rebillCount } = useMemo(() => {
+    if (!isEdit) return { lockedCount: 0, rebillCount: 0 }
+    const stById = new Map(statements.map((st) => [st.id, st]))
+    const paidTx = new Set(statementPayments.filter((l) => l.transactionId).map((l) => l.transactionId))
+    let locked = 0
+    let rebill = 0
+    for (const e of getEntries(installment.id)) {
+      if (e.status === 'paid') locked++
+      else if (e.status === 'billed') {
+        const st = stById.get(e.statementId)
+        if (!st || st.status === 'paid' || Number(st.paidAmount || 0) > 0 || paidTx.has(e.transactionId)) locked++
+        else rebill++
+      }
+    }
+    return { lockedCount: locked, rebillCount: rebill }
+  }, [isEdit, installment, getEntries, statements, statementPayments])
   const planLocked = lockedCount > 0
 
   const card = cards.find((c) => c.id === form.cardId) ?? null
@@ -284,8 +305,13 @@ export default function InstallmentFormPopup({ installment = null, cardId = '', 
       >
         {planLocked && (
           <div className="flex-none text-[11.5px] bg-pending-soft border border-pending-line text-[#8A6A15] rounded-ctl px-3 py-2">
-            มีงวดที่เข้าบิลหรือจ่ายไปแล้ว {lockedCount} งวด — แก้ได้เฉพาะชื่อ ผู้ขาย หมวดหมู่ และหมายเหตุ
+            มีงวดที่จ่ายไปแล้ว {lockedCount} งวด (จ่ายค่างวดผ่านแอป หรืออยู่ในบิลที่จ่ายแล้ว) — แก้ได้เฉพาะชื่อ ผู้ขาย หมวดหมู่ และหมายเหตุ
             ถ้าต้องแก้ยอดหรือจำนวนงวด ให้ย้อนงวดที่จ่ายไว้ก่อน
+          </div>
+        )}
+        {!planLocked && rebillCount > 0 && (
+          <div className="flex-none text-[11.5px] bg-paper border border-hairline text-muted rounded-ctl px-3 py-2">
+            มี {rebillCount} งวดที่เข้าบิลแล้วแต่บิลยังไม่ได้จ่าย — แก้ยอดได้ บันทึกแล้วยอดในบิลจะคิดใหม่ตามยอดที่แก้ให้เอง
           </div>
         )}
 
@@ -601,7 +627,8 @@ export default function InstallmentFormPopup({ installment = null, cardId = '', 
         message={
           `แก้ไข "${form.name}"\n` +
           `ตารางงวดทั้งหมดจะถูกสร้างใหม่ตามค่าที่กรอก\n` +
-          `รวม ${months} งวด${preview ? ` · ${fmt(preview.total)} บาท` : ''}`
+          `รวม ${months} งวด${preview ? ` · ${fmt(preview.total)} บาท` : ''}` +
+          (rebillCount > 0 ? `\n\nงวดที่อยู่ในบิลที่ยังไม่จ่าย ${rebillCount} งวด จะคิดยอดใหม่ในบิลใบเดิม — ยอดบิลและหนี้บัตรขยับตาม` : '')
         }
         onConfirm={handleSave}
         onCancel={() => setConfirm(false)}
