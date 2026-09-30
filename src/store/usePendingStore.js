@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { assertCanPay } from '../lib/balanceGuard'
 import * as pendingApi from '../lib/api/pending'
 import useTransactionStore from './useTransactionStore'
 import useWalletStore from './useWalletStore'
@@ -141,6 +142,9 @@ const usePendingStore = create((set, get) => ({
 
   /** จ่าย + สร้างรายการ + ตัดเงิน + อัปเดตรายการประจำ ในคำสั่งเดียว */
   payPendingAtomic: async (id, { method, accountId = null, date = null, log = null }) => {
+    // ยอดของรายการค้างชำระอยู่ในตัวรายการ ไม่ได้ส่งมากับคำสั่งจ่าย
+    const amount = get().pendingPayments.find((p) => p.id === id)?.amount ?? 0
+    await assertCanPay({ method, accountId, amount })   // เงินไม่พอ / ไม่จ่ายต่อ → หยุดก่อนแตะเงิน
     const tx = await pendingApi.payPendingPayment(id, { method, accountId, date, log })
     set((s) => ({
       pendingPayments: s.pendingPayments.map((p) =>

@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { assertCanPay } from '../lib/balanceGuard'
 import * as cardApi from '../lib/api/creditCards'
 import * as stmtApi from '../lib/api/cardStatements'
 import * as instApi from '../lib/api/cardInstallments'
@@ -161,6 +162,7 @@ const useCreditCardStore = create((set, get) => ({
   },
 
   payStatement: async (statementId, params) => {
+    await assertCanPay(params)   // เงินไม่พอ / ไม่จ่ายต่อ → หยุดก่อนแตะเงิน
     const statement = await stmtApi.payStatement(statementId, params)
     await get().refresh()
     return statement
@@ -245,6 +247,7 @@ const useCreditCardStore = create((set, get) => ({
 
   /** จ่ายค่างวดทีละงวด — เงินออกจากบัญชี/เงินสด ไม่ผ่านบัตร */
   payEntry: async (entryId, params) => {
+    await assertCanPay(params)   // เงินไม่พอ / ไม่จ่ายต่อ → หยุดก่อนแตะเงิน
     const entry = await instApi.payInstallmentEntry(entryId, params)
     await get().refresh()
     return entry

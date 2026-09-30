@@ -8,7 +8,25 @@
 -- ทุกฟังก์ชันในไฟล์นี้จึงทำทั้งขาออกและขาเข้าใน transaction เดียว
 --
 -- รันไฟล์นี้หลัง functions.sql — เป็น create or replace ทั้งหมด รันซ้ำได้
+-- ท้ายไฟล์: ค่าตั้ง "อนุญาตให้ยอดเงินติดลบ" ของร้าน
 -- ============================================================================
+
+
+-- ── กันรันผิดโปรเจกต์ ──────────────────────────────────────────────────────
+-- ไฟล์นี้ต้องรันในโปรเจกต์ของ JodFlow.money เท่านั้น (URL ลงท้ายด้วย ftpoidvwoeacbpyubbbm)
+
+do $guard$
+begin
+  if to_regclass('public.shop_settings') is null or to_regclass('public.wallet_state') is null then
+    raise exception E'⛔ รันผิดโปรเจกต์
+'
+      '   ฐานข้อมูลนี้ไม่มีตาราง shop_settings / wallet_state จึงไม่ใช่ฐานของ JodFlow.money
+'
+      '   สลับโปรเจกต์ที่แถบซ้ายบนไปโปรเจกต์ JODFLOW (URL ลงท้ายด้วย ftpoidvwoeacbpyubbbm)
+'
+      '   แล้ววางไฟล์นี้ใหม่ — ยังไม่มีอะไรถูกแก้ในฐานข้อมูลนี้';
+  end if;
+end $guard$;
 
 -- ── ย้ายเงินสด ↔ บัญชีเงินโอน ───────────────────────────────────────────────
 
@@ -374,9 +392,20 @@ begin
 end;
 $$;
 
--- ── ตรวจว่าฟังก์ชันครบ (ควรได้ 9 แถว) ───────────────────────────────────────
+-- ── อนุญาตให้ยอดเงินติดลบไหม ───────────────────────────────────────────────
+--
+-- ค่าตั้งระดับร้าน (ทุกเครื่องเห็นค่าเดียวกัน แก้ได้เฉพาะเจ้าของ) หน้าจอใช้ตัดสินตอนกดจ่าย
+--   false (ค่าตั้งต้น)  จ่ายเกินยอดในเงินสด/บัญชี/กระเป๋าย่อย → ขึ้นป๊อปอัป "เงินไม่พอจ่าย" กดยืนยันไม่ได้
+--   true               เตือนว่ายอดจะติดลบเท่าไร แล้วให้เลือกว่าจะจ่ายต่อไหม
+-- บัตรเครดิตไม่เกี่ยว — รูดคือก่อหนี้ ไม่ได้ตัดเงินจากที่ไหน
 
-select routine_name
+alter table shop_settings add column if not exists allow_negative_balance boolean not null default false;
+
+notify pgrst, 'reload schema';
+
+-- ── ตรวจผล (ควรได้ 10 แถว: ฟังก์ชัน 9 + คอลัมน์ 1) ─────────────────────────
+
+select 'ฟังก์ชัน' as "ประเภท", routine_name::text as "ชื่อ"
   from information_schema.routines
  where routine_schema = 'public'
    and routine_name in (
@@ -384,4 +413,8 @@ select routine_name
      'borrow_from_sub_wallet', 'return_loan',
      'pay_pending_payment', 'receive_pending_income', 'undo_pending_payment', 'edit_pending_payment'
    )
- order by routine_name;
+union all
+select 'คอลัมน์', 'shop_settings.' || column_name
+  from information_schema.columns
+ where table_schema = 'public' and table_name = 'shop_settings' and column_name = 'allow_negative_balance'
+ order by 1, 2;

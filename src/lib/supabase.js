@@ -92,6 +92,7 @@ export function toThaiError(error) {
     const what = fn ? `ฟังก์ชัน ${fn}` : col ? `คอลัมน์ ${col}` : 'บางส่วนของโครงสร้าง'
     const file = /card|statement|installment|advance/i.test(fn ?? col ?? '') ? 'supabase/card.sql'
       : /rolled_at|skipped_at|recurring/i.test(fn ?? col ?? '') ? 'supabase/recurring.sql'
+      : /allow_negative/i.test(fn ?? col ?? '') ? 'supabase/wallet.sql'
       : 'supabase/check.sql'
     return `ฐานข้อมูลยังไม่มี${what} — เปิด Supabase → SQL Editor วาง ${file} ตัวล่าสุดจาก repo ทับทั้งไฟล์แล้ว Run (ถ้ารันแล้วยังขึ้น แปลว่าไฟล์ในแท็บเป็นตัวเก่า) รันซ้ำได้ ข้อมูลเดิมไม่หาย`
   }

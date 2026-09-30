@@ -6,7 +6,8 @@ import useTransactionStore from '../../store/useTransactionStore'
 import usePendingStore from '../../store/usePendingStore'
 import useLogStore from '../../store/useLogStore'
 import { buildLogEntry } from '../../lib/logBuilder'
-import { addToWallet, willGoNegative } from '../../lib/walletEngine'
+import { addToWallet } from '../../lib/walletEngine'
+import { ensureCanPay } from '../../lib/balanceGuard'
 import useCreditCardStore from '../../store/useCreditCardStore'
 import { methodLabel } from '../../lib/walletEngine'
 import { walletTarget } from '../../lib/api/transactions'
@@ -117,7 +118,6 @@ export default function RecurringPage() {
   const [payTarget, setPayTarget] = useState(null) // { entry, item }
   const [deleteItemId, setDeleteItemId] = useState(null)
   const [undoTarget, setUndoTarget] = useState(null)
-  const [negativeWarn, setNegativeWarn] = useState(null) // { amount, method, proceed }
   const [showItemList, setShowItemList] = useState(false)
   const [view, setView] = useState(loadView)
   const [keepDays, setKeepDays] = useState(loadKeepDays)
@@ -455,21 +455,12 @@ export default function RecurringPage() {
     }
   }
 
-  const handlePayConfirm = (amount, paidMethod, paidDate, accountId = null, cardId = null, paidAt = null) => {
+  const handlePayConfirm = async (amount, paidMethod, paidDate, accountId = null, cardId = null, paidAt = null) => {
     const { entry, item } = payTarget
-    // บัตรเครดิตไม่ต้องเช็คยอดติดลบ เป็นหนี้อยู่แล้วโดยธรรมชาติ
-    if (paidMethod !== 'pending' && paidMethod !== 'card' && willGoNegative(paidMethod, amount, accountId)) {
-      setNegativeWarn({ amount, paidMethod, paidDate, accountId, cardId, entry, item, paidAt })
-      setPayTarget(null)
-      return
-    }
+    // ด่านยอดเงิน — บัตรเครดิตกับค้างชำระไม่ได้ตัดเงินจากที่ไหน ด่านจะปล่อยผ่านเอง
+    // ไม่ผ่าน (เงินไม่พอ / ผู้ใช้ไม่จ่ายต่อ) ก็คงหน้าต่างจ่ายไว้ ให้เปลี่ยนแหล่งเงินได้เลย
+    if (!(await ensureCanPay({ method: paidMethod, amount, accountId }))) return
     executeMarkPaid(entry, item, amount, paidMethod, paidDate, accountId, cardId, paidAt)
-  }
-
-  const handleNegativeConfirm = () => {
-    const { entry, item, amount, paidMethod, paidDate, accountId, cardId, paidAt } = negativeWarn
-    executeMarkPaid(entry, item, amount, paidMethod, paidDate, accountId, cardId, paidAt)
-    setNegativeWarn(null)
   }
 
   const handleSaveEntryAmount = async (amount) => {
@@ -1021,15 +1012,6 @@ export default function RecurringPage() {
         onConfirm={handleDeleteItem}
         onCancel={() => setDeleteItemId(null)}
         confirmLabel="ลบ"
-        danger
-      />
-      <ConfirmPopup
-        open={!!negativeWarn}
-        title="ยอดเงินไม่เพียงพอ"
-        message={`${methodLabel(negativeWarn?.paidMethod)}ไม่เพียงพอ ต้องการจ่ายต่อไปหรือไม่?\nยอดจะติดลบ`}
-        onConfirm={handleNegativeConfirm}
-        onCancel={() => setNegativeWarn(null)}
-        confirmLabel="จ่ายต่อไป"
         danger
       />
     </div>

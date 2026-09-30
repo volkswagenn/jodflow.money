@@ -50,6 +50,28 @@ function SettingCard({ icon, title, desc, rows = [], action, onClick }) {
 export default function SettingsPage() {
   const navigate = useNavigate()
   const { notifyDaysBefore, setNotifyDaysBefore, version } = useAppStore()
+  const allowNegative = useAppStore((st) => st.allowNegativeBalance)
+  const negativeReady = useAppStore((st) => st.negativeSettingReady)
+  const setAllowNegative = useAppStore((st) => st.setAllowNegativeBalance)
+  const [negBusy, setNegBusy] = useState(false)
+  const [negError, setNegError] = useState('')
+
+  /**
+   * สลับ "อนุญาตให้ยอดเงินติดลบ" — ค่าระดับร้าน เก็บใน shop_settings แก้ได้เฉพาะเจ้าของ
+   * รอผลจากเซิร์ฟเวอร์ก่อนค่อยขยับสวิตช์ ไม่งั้นคนที่ไม่มีสิทธิ์จะเห็นว่าสลับสำเร็จทั้งที่ถูกปฏิเสธ
+   */
+  const toggleAllowNegative = async () => {
+    if (negBusy) return
+    setNegBusy(true)
+    setNegError('')
+    try {
+      await setAllowNegative(!allowNegative)
+    } catch (err) {
+      setNegError(err.message)
+    } finally {
+      setNegBusy(false)
+    }
+  }
   const { profile, user, role, shop, shopDaysLeft, isPlatformAdmin } = useAuth()
   const taxWaiting = usePendingStore((s) => s.taxInvoices.filter((t) => t.status === 'waiting').length)
   const logCount = useLogStore((s) => s.total)
@@ -165,6 +187,50 @@ export default function SettingsPage() {
         action="เปิดหน้าสำรองข้อมูล"
         onClick={() => setPanel('backup')}
       />
+
+      {/* ยอดเงินติดลบ — เป็นสวิตช์บนการ์ดเลย ไม่ต้องกดเข้าไปอีกชั้น เพราะมีค่าเดียวให้เลือก
+          และเป็นกติกาเรื่องเงินที่ควรเห็นสถานะได้ทันทีที่เปิดหน้าตั้งค่า */}
+      <section className="card px-[18px] py-4 flex flex-col">
+        <div className="flex items-center gap-2.5">
+          <Icon name="account_balance_wallet" size={19} className="text-ink" />
+          <span className="text-[13.5px] font-semibold flex-1">อนุญาตให้ยอดเงินติดลบ</span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={allowNegative}
+            aria-label="อนุญาตให้ยอดเงินติดลบ"
+            onClick={toggleAllowNegative}
+            disabled={negBusy || role !== 'owner'}
+            className={`relative w-[44px] h-[26px] rounded-full flex-none transition-colors disabled:opacity-50 ${
+              allowNegative ? 'bg-income' : 'bg-[#C9C6BE]'
+            }`}
+          >
+            <span
+              className={`absolute top-[3px] left-[3px] w-5 h-5 rounded-full bg-white shadow transition-transform ${
+                allowNegative ? 'translate-x-[18px]' : ''
+              }`}
+            />
+          </button>
+        </div>
+        <p className="text-[11.5px] text-faint leading-relaxed mt-1.5">
+          ใช้กับเงินสด บัญชีธนาคาร และกระเป๋าย่อย ทุกครั้งที่จ่ายหรือย้ายเงินออก (บัตรเครดิตไม่เกี่ยว)
+        </p>
+        <div className="flex items-center gap-2.5 py-2.5 border-t border-[#F2F0EA] mt-2">
+          <span className="flex-1 min-w-0 text-[12.5px]">เมื่อจ่ายเกินยอดที่มี</span>
+          <span className={`text-[12.5px] font-semibold ${allowNegative ? 'text-pending' : 'text-ink'}`}>
+            {allowNegative ? 'เตือน แล้วจ่ายต่อได้' : 'จ่ายไม่ได้ · แจ้งว่าเงินไม่พอ'}
+          </span>
+        </div>
+        {role !== 'owner' && (
+          <p className="text-[11.5px] text-faint">เปลี่ยนได้เฉพาะเจ้าของร้าน</p>
+        )}
+        {!negativeReady && (
+          <p className="text-[11.5px] text-pending leading-relaxed">
+            ฐานข้อมูลยังไม่มีค่านี้ — ตอนนี้ทำงานแบบ "เตือนแล้วจ่ายต่อได้" รัน supabase/wallet.sql ก่อนจึงจะปิดได้
+          </p>
+        )}
+        {negError && <p className="text-[11.5px] text-expense leading-relaxed">{negError}</p>}
+      </section>
 
       <SettingCard
         icon="upload_file"

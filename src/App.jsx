@@ -6,6 +6,7 @@ import BottomTabs from './components/layout/BottomTabs'
 import SearchPopup from './components/shared/SearchPopup'
 import FloatingCalculator from './components/shared/FloatingCalculator'
 import { AdminViewBanner, TrialBanner } from './auth/StatusBanners'
+import BalanceGuardPopup from './components/shared/BalanceGuardPopup'
 
 export default function App() {
   const navigate = useNavigate()
@@ -57,6 +58,11 @@ export default function App() {
 
       <BottomTabs />
       {searchOpen && <SearchPopup onClose={() => setSearchOpen(false)} />}
+
+      {/* ด่านยอดเงินก่อนจ่าย — ต้องลอยเหนือหน้าต่างจ่ายที่เปิดค้างอยู่ข้างใต้ จึงยกชั้นขึ้นอีกระดับ */}
+      <div className="relative z-[80]">
+        <BalanceGuardPopup />
+      </div>
 
       {/* เครื่องคิดเลขลอย — อยู่นอกโครงหน้า จะได้ค้างอยู่ทุกหน้าและลอยเหนือทุกอย่าง */}
       <FloatingCalculator />

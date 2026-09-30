@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { assertCanPay } from '../lib/balanceGuard'
 import * as api from '../lib/api/debts'
 import { toDateString } from '../lib/cardCycle'
 
@@ -26,11 +27,32 @@ const useDebtStore = create((set, get) => ({
     await get().refresh()
     return debt
   },
-  payEntry: async (id, params) => { const r = await api.payDebtEntry(id, params); await get().refresh(); return r },
+  payEntry: async (id, params) => {
+    // ด่านยอดเงินใช้เฉพาะ "หนี้ที่เราต้องจ่าย" — ลูกหนี้ (receivable) คือเงินไหลเข้า
+    // ถ้าไปเช็คด้วย จะขึ้นว่าเงินไม่พอตอนรับเงินคืน ทั้งที่ยอดกำลังจะเพิ่ม
+    const entry = get().entries.find((e) => e.id === id)
+    const debt = get().debts.find((d) => d.id === entry?.debtId)
+    if (debt?.direction !== 'receivable') await assertCanPay(params)
+    const r = await api.payDebtEntry(id, params)
+    await get().refresh()
+    return r
+  },
   undoEntry: async (id, log) => { const r = await api.undoDebtEntry(id, log); await get().refresh(); return r },
   /** แก้ไขการจ่ายงวดในที่ — วิธี/บัญชี/ยอด/วันที่ */
   editEntryPayment: async (id, params) => { const r = await api.editDebtPayment(id, params); await get().refresh(); return r },
-  settleDebt: async (id, params) => { const r = await api.settleDebt(id, params); await get().refresh(); return r },
+  settleDebt: async (id, params) => {
+    // ปิดหนี้ทั้งก้อน = จ่ายทุกงวดที่เหลือ + ค่าธรรมเนียม ในครั้งเดียว (เฉพาะหนี้ที่เราต้องจ่าย)
+    const debt = get().debts.find((d) => d.id === id)
+    if (debt && debt.direction !== 'receivable') {
+      const remaining = get().entries
+        .filter((e) => e.debtId === id && e.status === 'pending')
+        .reduce((sum, e) => sum + (Number(e.amount) || 0), 0)
+      await assertCanPay({ method: params.method, accountId: params.accountId, amount: remaining + (Number(params.fee) || 0) })
+    }
+    const r = await api.settleDebt(id, params)
+    await get().refresh()
+    return r
+  },
   cancelDebt: async (id, log) => { const r = await api.cancelDebt(id, log); await get().refresh(); return r },
   /** แก้สัญญาทั้งฉบับ — งวดที่จ่ายไปแล้วไม่ถูกแตะ */
   editDebt: async (id, data, schedule, log) => {
