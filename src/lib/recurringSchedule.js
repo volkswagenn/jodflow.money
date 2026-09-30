@@ -131,6 +131,12 @@ export function shortThaiDate(iso) {
   return `${d.getDate()} ${THAI_MONTHS_SHORT[d.getMonth()]}`
 }
 
+/** เดือนก่อนหน้ารอบนี้แบบสั้น เช่น 'ส.ค.' — ใช้บนปุ่ม "ของ … " (บิลนี้เป็นของเดือนก่อน) */
+export function prevMonthShort(month) {
+  const m = Number(addMonths(month, -1).split('-')[1])
+  return THAI_MONTHS_SHORT[m - 1]
+}
+
 /** เดือนถัดจากรอบนี้แบบสั้น เช่น 'ต.ค.' — ใช้บนป้ายนับถอยหลังและปุ่ม "ไป … เลย" */
 export function nextMonthShort(month) {
   const m = Number(addMonths(month, 1).split('-')[1])

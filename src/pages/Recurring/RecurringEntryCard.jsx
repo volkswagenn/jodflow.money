@@ -1,5 +1,5 @@
 import useCategoryStore from '../../store/useCategoryStore'
-import { isYearly, scheduleLabel, cycleLabel, nextMonthShort, shortThaiDate } from '../../lib/recurringSchedule'
+import { isYearly, scheduleLabel, cycleLabel, nextMonthShort, prevMonthShort, shortThaiDate } from '../../lib/recurringSchedule'
 
 const METHOD_LABELS = { cash: 'เงินสด', transfer: 'โอนเงิน', card: 'บัตรเครดิต', pending: 'ค้างชำระ' }
 
@@ -11,7 +11,7 @@ function StatusBadge({ status, date }) {
   return <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">⏳ รอจ่าย</span>
 }
 
-export default function RecurringEntryCard({ entry, item, daysLeft, upcoming = false, onPay, onUndoPay, onSkip, onEdit, onDelete, onPause, onRoll }) {
+export default function RecurringEntryCard({ entry, item, daysLeft, upcoming = false, onPay, onUndoPay, onSkip, onEdit, onDelete, onPause, onRoll, onMovePrev }) {
   const { getCategoryName, getCategories } = useCategoryStore()
   const categories = getCategories('expense')
   const cat = categories.find((c) => c.id === item.category)
@@ -147,6 +147,16 @@ export default function RecurringEntryCard({ entry, item, daysLeft, upcoming = f
                   🗑
                 </button>
               </>
+            )}
+            {/* บิลที่จ่าย/ข้ามนี้จริงๆ เป็นของเดือนก่อน — ย้ายรอบ ไม่ใช่ยกเลิกการจ่าย (ไม่แตะเงิน) */}
+            {isDone && onMovePrev && !isYearly(item) && (
+              <button
+                onClick={() => onMovePrev(entry, item)}
+                className="btn btn-secondary text-xs py-1 px-2"
+                title={`บิลนี้เป็นของเดือน ${prevMonthShort(entry.month)} — ย้ายไปเดือนนั้น แล้วรอบเดือนนี้กลับเป็นรอจ่าย (ไม่คืนเงิน ไม่ลบรายจ่าย)`}
+              >
+                ← ของ {prevMonthShort(entry.month)}
+              </button>
             )}
             {/* ไม่อยากรอนับถอยหลัง — ย้ายไปเป็นบิลเดือนถัดไปทันที */}
             {isDone && daysLeft != null && onRoll && (

@@ -152,6 +152,37 @@ export async function markEntrySkipped(id) {
   return fromRow('recurring_entries', res.data)
 }
 
+/**
+ * ย้ายรอบที่จัดการแล้วไปเป็นของอีกเดือน — "บิลที่จ่ายไปนี้เป็นของเดือนก่อน"
+ *
+ * เกิดจริงตอนเริ่มใช้ระบบกลางรอบ: จ่ายบิลเดือน ส.ค. ตอนต้น ก.ย. แต่ระบบมีแค่รอบ ก.ย.
+ * ให้กด จึงไปลงเป็นของ ก.ย. ทั้งที่ ก.ย. ยังไม่ได้จ่าย ทางแก้ที่ถูกคือ "ย้ายรอบ" ไม่ใช่
+ * "ยกเลิกการจ่าย" — การยกเลิกคืนเงินเข้ากระเป๋าและลบรายจ่าย ทั้งที่เงินออกไปแล้วจริง
+ *
+ * ไม่แตะเงิน ไม่แตะรายจ่ายที่ผูกอยู่ (ยังชี้มาที่รอบเดิมด้วย id) เปลี่ยนแค่เดือนกับวันครบกำหนด
+ * รอบรอจ่ายที่ระบบสร้างรอไว้ในเดือนปลายทางถูกถอยออกให้ แต่ถ้าเดือนนั้นจัดการไปแล้วจะไม่ทับ
+ *
+ * @returns { entry, removedId } รอบที่ย้ายแล้ว และ id ของรอบรอจ่ายที่ถูกถอยออก (ถ้ามี)
+ */
+export async function moveRecurringEntry(entry, targetMonth, dueDate) {
+  const existing = await unwrap(
+    supabase
+      .from('recurring_entries')
+      .select('id, status, transaction_id, pending_payment_id')
+      .eq('recurring_id', entry.recurringId)
+      .eq('month', targetMonth)
+      .maybeSingle()
+  )
+  if (existing) {
+    if (existing.status !== 'pending' || existing.transaction_id || existing.pending_payment_id) {
+      throw new Error('เดือนปลายทางมีรอบที่จ่ายหรือข้ามไปแล้ว ย้ายไปทับไม่ได้')
+    }
+    await unwrap(supabase.from('recurring_entries').delete().eq('id', existing.id))
+  }
+  const moved = await updateRecurringEntry(entry.id, { month: targetMonth, dueDate })
+  return { entry: moved, removedId: existing?.id ?? null }
+}
+
 /** ไม่รอนับถอยหลัง — ย้ายบิลที่จ่ายแล้ว/ข้ามไปเป็นบิลของเดือนถัดไปทันที */
 export async function rollEntryToNextMonth(id) {
   return updateRecurringEntry(id, { rolledAt: new Date().toISOString() })

@@ -17,7 +17,7 @@ import UiIcon from '../../components/shared/UiIcon'
 import ConfirmPopup from '../../components/shared/ConfirmPopup'
 import RecurringEntryCard from './RecurringEntryCard'
 import RecurringEntryRow from './RecurringEntryRow'
-import { addMonths, isYearly, occursInMonth, pauseInfo, pauseLabel, scheduleLabel } from '../../lib/recurringSchedule'
+import { addMonths, isYearly, monthName, occursInMonth, pauseInfo, pauseLabel, scheduleLabel } from '../../lib/recurringSchedule'
 import PausePopup from './PausePopup'
 import RecurringPausedCard from './RecurringPausedCard'
 import { localMonthStr } from '../../lib/dateUtils'
@@ -122,12 +122,14 @@ export default function RecurringPage() {
   const [view, setView] = useState(loadView)
   const [keepDays, setKeepDays] = useState(loadKeepDays)
   const [pauseTarget, setPauseTarget] = useState(null)
+  // รอบที่กำลังจะย้ายไปเป็นของเดือนก่อน — ยืนยันก่อนเสมอ เพราะรอบจะหายจากเดือนที่ดูอยู่
+  const [movePrevTarget, setMovePrevTarget] = useState(null)
   const changeView = (v) => { setView(v); try { localStorage.setItem(VIEW_KEY, v) } catch {} }
   const changeKeepDays = (n) => { setKeepDays(n); try { localStorage.setItem(KEEP_KEY, String(n)) } catch {} }
 
   const {
     items, entries, addItem, updateItem, toggleItem, deleteItem,
-    generateEntries, updateEntry, markSkipped, rollToNextMonth, getPendingCountCurrentMonth, syncPendingEntries,
+    generateEntries, updateEntry, markSkipped, rollToNextMonth, moveToPrevMonth, getPendingCountCurrentMonth, syncPendingEntries,
     pauseItem, resumeItem,
     syncEntryFromTransaction,
   } = useRecurringStore()
@@ -625,6 +627,30 @@ export default function RecurringPage() {
     }
   }
 
+  /**
+   * "บิลนี้เป็นของเดือนก่อน" — ย้ายรอบที่จ่าย/ข้ามแล้วไปเดือนก่อนหน้า แล้วรอบเดือนนี้กลับเป็นรอจ่าย
+   *
+   * ต่างจากยกเลิกการจ่ายโดยสิ้นเชิง: ยกเลิก = คืนเงินเข้ากระเป๋า + ลบรายจ่าย ซึ่งผิดเมื่อเงินออกไป
+   * แล้วจริง การย้ายรอบเปลี่ยนแค่ว่า "บิลใบนี้นับเป็นของเดือนไหน" เงินและรายจ่ายอยู่เหมือนเดิม
+   */
+  const handleMovePrev = async () => {
+    const { entry, item } = movePrevTarget
+    setActionError('')
+    try {
+      const from = entry.month
+      await moveToPrevMonth(entry.id)
+      addLog(buildLogEntry({
+        activityType: 'RECURRING_UPDATE',
+        description: `ย้ายรอบ "${item.name}" จาก ${monthName(from)} ไปเป็นของ ${monthName(addMonths(from, -1))} (ไม่แตะเงิน)`,
+        newValue: { recurringEntryId: entry.id, recurringId: item.id, fromMonth: from, toMonth: addMonths(from, -1) },
+      }))
+    } catch (err) {
+      setActionError(err.message)
+    } finally {
+      setMovePrevTarget(null)
+    }
+  }
+
   // แม่แบบที่ถูกซ่อน (ลบไปแล้วแต่ยังมีประวัติจ่าย) ไม่ต้องโผล่ในลิสต์จัดการ
   // แต่ยังต้องอยู่ใน items เพื่อให้รอบที่จ่ายแล้วของเดือนเก่าแสดงชื่อรายการได้
   const activeItems = useMemo(() => items.filter((it) => !it.deleted), [items])
@@ -792,6 +818,7 @@ export default function RecurringPage() {
                 item={item}
                 daysLeft={daysLeft}
                 onRoll={handleRoll}
+                onMovePrev={(entry, item) => setMovePrevTarget({ entry, item })}
                 onPay={handlePay}
                 onUndoPay={handleUndoPay}
                 onSkip={handleSkip}
@@ -966,6 +993,18 @@ export default function RecurringPage() {
           onClose={() => setPayTarget(null)}
         />
       )}
+      <ConfirmPopup
+        open={!!movePrevTarget}
+        title="ย้ายรอบไปเดือนก่อน"
+        message={movePrevTarget ? [
+          `"${movePrevTarget.item.name}" ที่${movePrevTarget.entry.status === 'paid' ? 'จ่ายแล้ว' : 'ข้ามแล้ว'}นี้ จะนับเป็นของ ${monthName(addMonths(movePrevTarget.entry.month, -1))}`,
+          `รอบ ${monthName(movePrevTarget.entry.month)} จะกลับมาเป็น "รอจ่าย" ใบใหม่`,
+          'ไม่คืนเงิน ไม่ลบรายจ่าย — ยอดกระเป๋าและประวัติการจ่ายเหมือนเดิมทุกอย่าง',
+        ].join('\n') : ''}
+        onConfirm={handleMovePrev}
+        onCancel={() => setMovePrevTarget(null)}
+        confirmLabel="ย้ายรอบ"
+      />
       <ConfirmPopup
         open={!!undoTarget}
         title="ยกเลิกการจ่าย"

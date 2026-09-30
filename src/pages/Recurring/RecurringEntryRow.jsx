@@ -1,5 +1,5 @@
 import useCategoryStore from '../../store/useCategoryStore'
-import { isYearly, scheduleLabel, cycleLabel, nextMonthShort, shortThaiDate } from '../../lib/recurringSchedule'
+import { isYearly, scheduleLabel, cycleLabel, nextMonthShort, prevMonthShort, shortThaiDate } from '../../lib/recurringSchedule'
 
 /**
  * แถวย่อ — บรรทัดเดียวต่อรายการ สำหรับคนที่มีรายจ่ายประจำเยอะ
@@ -12,7 +12,7 @@ const STATUS = {
   pending: { dot: 'bg-amber-400',   text: 'text-amber-600',   label: 'รอจ่าย' },
 }
 
-export default function RecurringEntryRow({ entry, item, daysLeft, upcoming = false, onPay, onUndoPay, onSkip, onEdit, onDelete, onPause, onRoll }) {
+export default function RecurringEntryRow({ entry, item, daysLeft, upcoming = false, onPay, onUndoPay, onSkip, onEdit, onDelete, onPause, onRoll, onMovePrev }) {
   const { getCategoryName, getCategories } = useCategoryStore()
   const cat = getCategories('expense').find((c) => c.id === item.category)
   const catName = cat ? cat.name : getCategoryName(item.category) || 'หมวดหมู่ถูกลบ'
@@ -83,6 +83,16 @@ export default function RecurringEntryRow({ entry, item, daysLeft, upcoming = fa
 
       {/* ปุ่ม */}
       <div className="flex gap-1 flex-shrink-0 min-w-[208px] justify-end whitespace-nowrap">
+        {/* บิลที่จ่าย/ข้ามนี้จริงๆ เป็นของเดือนก่อน — ย้ายรอบ ไม่ใช่ยกเลิกการจ่าย (ไม่แตะเงิน) */}
+        {isDone && onMovePrev && !isYearly(item) && (
+          <button
+            onClick={() => onMovePrev(entry, item)}
+            className="btn btn-secondary text-xs !h-7 px-2"
+            title={`บิลนี้เป็นของเดือน ${prevMonthShort(entry.month)} — ย้ายไปเดือนนั้น แล้วรอบเดือนนี้กลับเป็นรอจ่าย (ไม่คืนเงิน ไม่ลบรายจ่าย)`}
+          >
+            ← ของ {prevMonthShort(entry.month)}
+          </button>
+        )}
         {/* ไม่อยากรอนับถอยหลัง — ย้ายไปเป็นบิลเดือนถัดไปทันที */}
         {isDone && daysLeft != null && onRoll && (
           <button

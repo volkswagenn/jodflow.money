@@ -101,6 +101,28 @@ const useRecurringStore = create((set, get) => ({
     return entry
   },
 
+  /**
+   * "บิลนี้เป็นของเดือนก่อน" — ย้ายรอบที่จ่ายแล้ว/ข้ามไปเป็นของเดือนก่อนหน้า
+   * แล้วสร้างรอบรอจ่ายของเดือนเดิมขึ้นมาแทน ไม่แตะเงินและรายจ่ายที่ผูกอยู่
+   */
+  moveToPrevMonth: async (entryId) => {
+    const e = get().entries.find((x) => x.id === entryId)
+    const item = get().items.find((it) => it.id === e?.recurringId)
+    if (!e || !item) throw new Error('ไม่พบรอบนี้ ลองโหลดหน้าใหม่')
+
+    const target = addMonths(e.month, -1)
+    const [y, m] = target.split('-').map(Number)
+    const { entry, removedId } = await recurringApi.moveRecurringEntry(e, target, computeDueDate(y, m, item.billingDay))
+    set((s) => ({
+      entries: s.entries
+        .filter((x) => x.id !== removedId)
+        .map((x) => (x.id === entryId ? { ...x, ...entry } : x)),
+    }))
+    // เดือนเดิมว่างแล้ว — ให้มีรอบรอจ่ายของเดือนนั้นกลับมาทันที ไม่ต้องรอสลับเดือนไปกลับ
+    await get().generateEntries(e.month)
+    return entry
+  },
+
   /** ไม่รอนับถอยหลัง — ย้ายบิลที่จ่ายแล้ว/ข้ามไปเป็นบิลของเดือนถัดไปทันที */
   rollToNextMonth: async (entryId) => {
     const entry = await recurringApi.rollEntryToNextMonth(entryId)
