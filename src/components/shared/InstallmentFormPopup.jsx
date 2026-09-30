@@ -571,14 +571,20 @@ export default function InstallmentFormPopup({ installment = null, cardId = '', 
               })).filter((x) => x.st)
               if (closed.length === 0) return null
               const attach = closed.filter((x) => x.st.status !== 'paid')
+              // แก้สัญญาเดิม: งวดที่อยู่ในใบนั้นแล้วจะถูกถอนออกก่อนเติมยอดใหม่ ยอดบิลจึงขยับแค่ส่วนต่าง
+              // (ถ้าบอกยอดเต็ม คนจะนึกว่าบิลบวกซ้ำ)
+              const already = isEdit
+                ? getEntries(installment.id).filter((e) => e.status === 'billed' && attach.some((x) => x.st.id === e.statementId))
+                : []
+              const addNet = attach.reduce((n, x) => n + x.r.amount, 0) - already.reduce((n, e) => n + Number(e.amount || 0), 0)
               const sweep = closed.filter((x) => x.st.status === 'paid')
               return (
                 <div className="text-[11px] text-[#8A6A15] bg-pending-soft border border-pending-line rounded-lg px-2.5 py-2 leading-relaxed">
                   {attach.length > 0 && (
                     <div>
                       งวด {attach.map((x) => x.r.seq).join(', ')} อยู่ในรอบที่ออกบิลไปแล้ว —
-                      ระบบจะเพิ่มเข้าบิลใบนั้นให้ทันที (บิลรอบ {attach.map((x) => x.st.cycle).join(', ')} ยอดจะเพิ่มขึ้น
-                      {' '}{fmt(attach.reduce((n, x) => n + x.r.amount, 0))} บาท)
+                      ระบบจะ{already.length > 0 ? 'คิดยอดในบิลใบนั้นใหม่' : 'เพิ่มเข้าบิลใบนั้นให้ทันที'} (บิลรอบ {attach.map((x) => x.st.cycle).join(', ')} ยอด{addNet >= 0 ? 'เพิ่มขึ้น' : 'ลดลง'}
+                      {' '}{fmt(Math.abs(addNet))} บาท{already.length > 0 ? ` — เดิมอยู่ในบิล ${fmt(already.reduce((n, e) => n + Number(e.amount || 0), 0))}` : ''})
                       ถ้างวดนี้จ่ายไปแล้วจริง ให้เพิ่มจำนวน "ผ่อนมาก่อนแล้ว" แทน
                     </div>
                   )}
