@@ -17,6 +17,8 @@ import InstallmentHistoryPopup from '../../components/shared/InstallmentHistoryP
 import useWalletStore from '../../store/useWalletStore'
 import { formatIsoThai } from '../../lib/cardCycle'
 import SourceTag from '../../components/shared/SourceTag'
+import EntryPips from '../../components/shared/EntryPips'
+import useTransactionStore from '../../store/useTransactionStore'
 
 const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })
 
@@ -74,7 +76,7 @@ function SettlePopup({ installment, remaining, count, onConfirm, onCancel, busy 
   )
 }
 
-function InstallmentCard({ installment, onSettle, onCancelInstallment, onPayEntry, onUndoEntry, onEdit, onDelete }) {
+function InstallmentCard({ installment, paidViaBill = null, onSettle, onCancelInstallment, onPayEntry, onUndoEntry, onEdit, onDelete }) {
   const [open, setOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const progress = useCreditCardStore((s) => s.getInstallmentProgress(installment.id))
@@ -90,7 +92,6 @@ function InstallmentCard({ installment, onSettle, onCancelInstallment, onPayEntr
   const hasInterest = interest > 0
   const hasTiers = Array.isArray(installment.tiers) && installment.tiers.length > 1
   const done = progress.paidCount + progress.billedCount + progress.prepaidCount
-  const pct = installment.months > 0 ? (done / installment.months) * 100 : 0
   // "งวดถัดไป" คืองวดที่ยังไม่ถูกเรียกเก็บ งวดที่อยู่ในบิลแล้วถือว่าเลยไปแล้ว
   const nextRow = progress.rows.find((r) => r.status === 'pending')
   const isActive = installment.status === 'active'
@@ -141,9 +142,8 @@ function InstallmentCard({ installment, onSettle, onCancelInstallment, onPayEntr
           </span>
           <span className="tabular-nums shrink-0">งวด {done} จาก {installment.months}</span>
         </div>
-        <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
-          <div className="h-full rounded-full bg-rose-400" style={{ width: `${pct}%` }} />
-        </div>
+        {/* ป้ายทุกงวดแทนแถบความคืบหน้า — แบบเดียวกับหน้าบัตร */}
+        <EntryPips rows={progress.rows} closingDay={card?.closingDay} paidViaBill={paidViaBill} />
       </div>
 
       {isActive && nextRow && (
@@ -256,6 +256,8 @@ function InstallmentCard({ installment, onSettle, onCancelInstallment, onPayEntr
 
 export default function InstallmentList({ bare = false }) {
   const installments = useCreditCardStore((s) => s.installments)
+  const statements = useCreditCardStore((s) => s.statements)
+  const transactions = useTransactionStore((s) => s.transactions)
   const { settleInstallment, cancelInstallment, payStatement, payEntry, undoEntry } = useCreditCardStore()
   const deleteInstallment = useCreditCardStore((s) => s.deleteInstallment)
   const getUnpaidStatements = useCreditCardStore((s) => s.getUnpaidStatements)
@@ -362,6 +364,17 @@ export default function InstallmentList({ bare = false }) {
   }
 
   const active = installments.filter((i) => i.status === 'active')
+
+  // งวดที่ "จ่ายแล้วผ่านบิลบัตร" — สถานะในฐานข้อมูลยังเป็น billed (ดูเหตุผลที่ EntryPips)
+  // นับเมื่อรายการของงวดผูกอยู่กับบิลที่จ่ายครบแล้ว กฎเดียวกับหน้าบัตร
+  const paidViaBill = (() => {
+    const paidIds = new Set(statements.filter((st) => st.status === 'paid').map((st) => st.id))
+    const out = new Set()
+    for (const t of transactions) {
+      if (t.installmentEntryId && t.cardStatementId && paidIds.has(t.cardStatementId)) out.add(t.installmentEntryId)
+    }
+    return out
+  })()
   // สัญญาที่ยกเลิกแล้วไม่ถูกโหลดมาตั้งแต่ชั้น API — ตัวกรองนี้กันไว้อีกชั้นเผื่อ
   // ข้อมูลเก่าที่ค้างอยู่ใน store ก่อนรีเฟรช จะได้ไม่โผล่มาให้เห็นชั่ววูบ
   const done = installments.filter((i) => i.status === 'completed')
@@ -485,6 +498,7 @@ export default function InstallmentList({ bare = false }) {
               <InstallmentCard
                 key={i.id}
                 installment={i}
+                paidViaBill={paidViaBill}
                 onPayEntry={(ins, row) => setPayEntryTarget({ installment: ins, entry: row })}
                 onUndoEntry={(ins, row) => setUndoEntryTarget({ installment: ins, entry: row })}
                 onSettle={(ins, progress) => setSettleTarget({ installment: ins, progress })}
@@ -509,6 +523,7 @@ export default function InstallmentList({ bare = false }) {
                     <InstallmentCard
                       key={i.id}
                       installment={i}
+                      paidViaBill={paidViaBill}
                       onSettle={() => {}}
                       onCancelInstallment={() => {}}
                     />

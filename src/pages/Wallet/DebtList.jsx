@@ -12,6 +12,7 @@ import DatePicker from '../../components/shared/DatePicker'
 import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
 import PayDebtPopup from '../../components/shared/PayDebtPopup'
 import SourceTag from '../../components/shared/SourceTag'
+import EntryPips from '../../components/shared/EntryPips'
 
 const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })
 
@@ -68,7 +69,6 @@ function DebtCard({ debt, onPay, onUndo, onSettle, onCancelDebt }) {
   if (!progress) return null
   const isRecv = debt.direction === 'receivable'
   const active = debt.status === 'active'
-  const pct = debt.months > 0 ? (progress.doneCount / debt.months) * 100 : 0
   const next = progress.next
   const left = next ? daysUntil(new Date(next.dueDate + 'T00:00:00')) : null
   const tone = isRecv ? 'text-emerald-700' : 'text-amber-800'
@@ -98,9 +98,9 @@ function DebtCard({ debt, onPay, onUndo, onSettle, onCancelDebt }) {
           <span>งวดละ {fmt(debt.monthlyAmount)} · ยอดรวม {fmt(debt.totalAmount)}</span>
           <span className="tabular-nums shrink-0">งวด {progress.doneCount} จาก {debt.months}</span>
         </div>
-        <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
-          <div className={`h-full rounded-full ${isRecv ? 'bg-emerald-500' : 'bg-amber-600'}`} style={{ width: `${pct}%` }} />
-        </div>
+        {/* ป้ายทุกงวดแทนแถบความคืบหน้า — แบบเดียวกับหน้าบัตร เห็นเลยว่างวดไหนครบกำหนดวันไหน
+            จ่ายแล้วหรือยัง ไม่ต้องกดเปิดตารางก่อน (ตารางด้านล่างยังอยู่ไว้ดูวันจ่ายจริงและย้อนการจ่าย) */}
+        <EntryPips rows={progress.rows} />
       </div>
 
       {active && next && (
