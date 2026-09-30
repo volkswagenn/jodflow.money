@@ -1654,22 +1654,14 @@ begin
     from transactions t
    where t.card_id = p_card and t.shop_id = p_shop and t.type = 'expense'
      and t.date <= p_end
-     and t.card_statement_id is null
-     and not exists (
-       select 1 from card_statements s
-        where s.card_id = p_card and t.date between s.period_start and s.period_end
-     );
+     and t.card_statement_id is null;
 
   -- รายรับที่ปลายทางเป็นบัตร = เครดิตเงินคืน หรือเงินคืนสินค้า → ลดยอดที่ต้องชำระ
   select coalesce(sum(t.amount), 0) into v_credit
     from transactions t
    where t.card_id = p_card and t.shop_id = p_shop and t.type = 'income'
      and t.date <= p_end
-     and t.card_statement_id is null
-     and not exists (
-       select 1 from card_statements s
-        where s.card_id = p_card and t.date between s.period_start and s.period_end
-     );
+     and t.card_statement_id is null;
 
   v_amount := v_prev + v_spend - v_credit;
   if v_amount < 0 then v_amount := 0; end if;   -- เงินคืนมากกว่ายอดรูด = ไม่ต้องจ่าย
@@ -1685,6 +1677,13 @@ begin
     case when v_amount <= 0 then 'paid' else 'closed' end,
     v_prev, v_spend, v_credit, v_amount, v_min
   ) returning * into v_st;
+
+  -- ผูกรายการที่เพิ่งถูกนับเข้าใบนี้ — เงื่อนไขเดียวกับตอนรวมยอดข้างบนเป๊ะ
+  -- นี่คือหลักฐานว่า "รายการนี้ถูกเก็บไปแล้ว" ที่ทุกที่ใช้อ่านต่อ ไม่ต้องเดาจากวันที่อีก
+  update transactions
+     set card_statement_id = v_st.id
+   where card_id = p_card and shop_id = p_shop
+     and card_statement_id is null and date <= p_end;
 
   -- ผูกงวดที่เพิ่งเข้าบิลกับใบนี้ เพื่อให้อ่านวันที่จ่ายจริงจากใบได้
   update card_installment_entries e
@@ -2698,22 +2697,14 @@ begin
     from transactions t
    where t.card_id = p_card and t.shop_id = p_shop and t.type = 'expense'
      and t.date <= p_end
-     and t.card_statement_id is null
-     and not exists (
-       select 1 from card_statements s
-        where s.card_id = p_card and t.date between s.period_start and s.period_end
-     );
+     and t.card_statement_id is null;
 
   -- รายรับที่ปลายทางเป็นบัตร = เครดิตเงินคืน หรือเงินคืนสินค้า → ลดยอดที่ต้องชำระ
   select coalesce(sum(t.amount), 0) into v_credit
     from transactions t
    where t.card_id = p_card and t.shop_id = p_shop and t.type = 'income'
      and t.date <= p_end
-     and t.card_statement_id is null
-     and not exists (
-       select 1 from card_statements s
-        where s.card_id = p_card and t.date between s.period_start and s.period_end
-     );
+     and t.card_statement_id is null;
 
   -- เงินสดที่กดจากบัตรในรอบนี้ ธนาคารเรียกเก็บเหมือนยอดรูด (ค่าธรรมเนียมเป็นรายจ่ายอยู่ใน v_spend แล้ว)
   select coalesce(sum(amount), 0) into v_adv
@@ -2735,6 +2726,13 @@ begin
     case when v_amount <= 0 then 'paid' else 'closed' end,
     v_prev, v_spend, v_credit, v_amount, v_min, v_adv
   ) returning * into v_st;
+
+  -- ผูกรายการที่เพิ่งถูกนับเข้าใบนี้ — เงื่อนไขเดียวกับตอนรวมยอดข้างบนเป๊ะ
+  -- นี่คือหลักฐานว่า "รายการนี้ถูกเก็บไปแล้ว" ที่ทุกที่ใช้อ่านต่อ ไม่ต้องเดาจากวันที่อีก
+  update transactions
+     set card_statement_id = v_st.id
+   where card_id = p_card and shop_id = p_shop
+     and card_statement_id is null and date <= p_end;
 
   -- ผูกงวดที่เพิ่งเข้าบิลกับใบนี้ เพื่อให้อ่านวันที่จ่ายจริงจากใบได้
   update card_installment_entries e
@@ -3321,10 +3319,7 @@ begin
     raise exception 'ค่างวดผ่อนจ่ายที่เมนู "จ่ายค่างวด" ของสัญญานั้นแทน';
   end if;
   -- มีใบครอบแล้ว = อยู่ในบิลที่ออกแล้ว ต้องจ่ายที่บิลใบนั้น
-  if v_tx.card_statement_id is not null or exists (
-    select 1 from card_statements s
-     where s.card_id = v_tx.card_id and v_tx.date between s.period_start and s.period_end
-  ) then
+  if v_tx.card_statement_id is not null then
     raise exception 'รายการนี้อยู่ในบิลที่ออกแล้ว ให้กด "จ่ายบิล" แล้วใส่ยอดเฉพาะรายการนี้แทน';
   end if;
 
@@ -4027,22 +4022,14 @@ begin
     from transactions t
    where t.card_id = p_card and t.shop_id = p_shop and t.type = 'expense'
      and t.date <= p_end
-     and t.card_statement_id is null
-     and not exists (
-       select 1 from card_statements s
-        where s.card_id = p_card and t.date between s.period_start and s.period_end
-     );
+     and t.card_statement_id is null;
 
   -- รายรับที่ปลายทางเป็นบัตร = เครดิตเงินคืน หรือเงินคืนสินค้า → ลดยอดที่ต้องชำระ
   select coalesce(sum(t.amount), 0) into v_credit
     from transactions t
    where t.card_id = p_card and t.shop_id = p_shop and t.type = 'income'
      and t.date <= p_end
-     and t.card_statement_id is null
-     and not exists (
-       select 1 from card_statements s
-        where s.card_id = p_card and t.date between s.period_start and s.period_end
-     );
+     and t.card_statement_id is null;
 
   -- เงินสดที่กดจากบัตรที่ยังไม่ถูกเรียกเก็บ ธนาคารเรียกเก็บเหมือนยอดรูด
   -- (ค่าธรรมเนียมเป็นรายจ่ายอยู่ใน v_spend แล้ว) ใช้ statement_id เป็นตัวบอกว่าเก็บไปแล้วหรือยัง
@@ -4065,6 +4052,13 @@ begin
     case when v_amount <= 0 then 'paid' else 'closed' end,
     v_prev, v_spend, v_credit, v_amount, v_min, v_adv
   ) returning * into v_st;
+
+  -- ผูกรายการที่เพิ่งถูกนับเข้าใบนี้ — เงื่อนไขเดียวกับตอนรวมยอดข้างบนเป๊ะ
+  -- นี่คือหลักฐานว่า "รายการนี้ถูกเก็บไปแล้ว" ที่ทุกที่ใช้อ่านต่อ ไม่ต้องเดาจากวันที่อีก
+  update transactions
+     set card_statement_id = v_st.id
+   where card_id = p_card and shop_id = p_shop
+     and card_statement_id is null and date <= p_end;
 
   -- ผูกงวดที่เพิ่งเข้าบิลกับใบนี้ เพื่อให้อ่านวันที่จ่ายจริงจากใบได้
   -- (รวมงวดตกค้างจากรอบก่อนที่เพิ่งถูกกวาดมาเก็บในใบนี้ด้วย — ดูเงื่อนไข e.cycle <= p_cycle ข้างบน)
@@ -4144,10 +4138,7 @@ begin
     raise exception 'ค่างวดผ่อนจ่ายที่เมนู "จ่ายค่างวด" ของสัญญานั้นแทน';
   end if;
   -- มีใบครอบแล้ว = อยู่ในบิลที่ออกแล้ว ต้องจ่ายที่บิลใบนั้น
-  if v_tx.card_statement_id is not null or exists (
-    select 1 from card_statements s
-     where s.card_id = v_tx.card_id and v_tx.date between s.period_start and s.period_end
-  ) then
+  if v_tx.card_statement_id is not null then
     raise exception 'รายการนี้อยู่ในบิลที่ออกแล้ว ให้กด "จ่ายบิล" แล้วใส่ยอดเฉพาะรายการนี้แทน';
   end if;
 
@@ -4851,3 +4842,59 @@ $$;
 
 
 notify pgrst, 'reload schema';
+
+-- ###########################################################################
+-- ##  18. ผูกรายการเก่ากับใบที่เคยเก็บมันไป (ทำครั้งเดียว ปลอดภัยถ้ารันซ้ำ)
+-- ###########################################################################
+--
+-- อาการที่แก้: คีย์รายการย้อนวันเข้าไปในรอบที่ปิดไปแล้ว หนี้บัตรเพิ่มจริงแต่ไม่มีใบไหน
+-- เก็บ — ใบเก่าปิดยอดไปตั้งแต่ก่อนรายการนั้นจะมี ส่วนบิลใบถัดไปก็ข้ามให้ เพราะกฎเดิม
+-- คือ "วันที่ตกในช่วงของใบไหนแล้ว = เก็บไปแล้ว" ซึ่งจริงเฉพาะกับรายการที่มีอยู่ตอนปิดรอบ
+-- ยิ่งถ้าใบนั้นจ่ายครบแล้ว หน้าจอจะขึ้นว่า "จ่ายแล้ว" ให้ด้วยทั้งที่ยังไม่ได้จ่ายสักบาท
+--
+-- ตั้งแต่นี้ไปตอนปิดรอบจะผูกรายการกับใบให้เลย (ส่วนที่ 6) ตรงนี้คือการผูกย้อนหลัง
+-- ให้ข้อมูลเดิม โดยเอาเฉพาะรายการที่ "มีอยู่ก่อนใบนั้นปิด" เท่านั้น เพราะนั่นคือชุดที่
+-- ถูกนับรวมในยอดของใบจริงๆ ส่วนที่คีย์เข้ามาทีหลังไม่เคยถูกนับ — ปล่อยให้ว่างไว้
+-- บิลใบถัดไปจะกวาดไปเก็บเองตามกฎใหม่
+
+update transactions t
+   set card_statement_id = (
+     select s.id from card_statements s
+      where s.card_id = t.card_id
+        and t.date between s.period_start and s.period_end
+        and t.created_at <= s.closed_at
+      order by s.period_end
+      limit 1
+   )
+ where t.card_id is not null
+   and t.card_statement_id is null
+   and exists (
+     select 1 from card_statements s
+      where s.card_id = t.card_id
+        and t.date between s.period_start and s.period_end
+        and t.created_at <= s.closed_at
+   );
+
+notify pgrst, 'reload schema';
+
+-- ตรวจผล: ต้องไม่เหลือรายการที่ "อยู่ในช่วงของใบที่ปิดไปแล้วตั้งแต่ก่อนมันเกิด"
+-- แต่ยังไม่ถูกผูกกับใบ · ส่วนรายการที่คีย์ย้อนหลังทีหลังจะขึ้นเป็น "รอเข้าบิลใบหน้า"
+select 'ผูกรายการกับใบแล้ว' as "รายการ",
+       count(*)::text || ' รายการ' as "ผล"
+  from transactions where card_statement_id is not null
+union all
+select 'ยังไม่เข้าบิล (บิลใบหน้าจะเก็บให้)',
+       count(*)::text || ' รายการ'
+  from transactions t
+ where t.card_id is not null and t.card_statement_id is null
+union all
+select 'ตกค้างแบบไม่มีใบเก็บ (ต้องเป็น 0)',
+       count(*)::text || ' รายการ'
+  from transactions t
+ where t.card_id is not null and t.card_statement_id is null
+   and exists (
+     select 1 from card_statements s
+      where s.card_id = t.card_id
+        and t.date between s.period_start and s.period_end
+        and t.created_at <= s.closed_at
+   );

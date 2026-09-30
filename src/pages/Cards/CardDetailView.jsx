@@ -355,10 +355,9 @@ export default function CardDetailView({ cardId }) {
    * จนเต็มยอด (ปุ่ม "จ่ายยอดนี้")
    */
   const entryPaidViaBill = useMemo(() => {
-    const paidStmts = statements.filter((s) => s.status === 'paid')
-    const inPaidStatement = (t) => paidStmts.some((s) => (
-      t.cardStatementId ? t.cardStatementId === s.id : (t.date >= s.periodStart && t.date <= s.periodEnd)
-    ))
+    const paidIds = new Set(statements.filter((s) => s.status === 'paid').map((s) => s.id))
+    // ผูกกับใบที่จ่ายครบแล้วเท่านั้นถึงนับว่าจ่าย — ไม่เดาจากวันที่ (ดูหมายเหตุที่ billRows)
+    const inPaidStatement = (t) => !!t.cardStatementId && paidIds.has(t.cardStatementId)
     const out = new Set()
     for (const t of transactions) {
       if (!t.installmentEntryId || t.cardId !== cardId) continue
@@ -459,20 +458,18 @@ export default function CardDetailView({ cardId }) {
   }, [transactions, statements, advances, card, cardId, getCategoryName, installments, allEntries, getUncoveredTransactions, todayStr, upcomingVisible, prepaidByTx])
 
   /**
-   * รายการของบิลใบที่ออกไปแล้วและยังไม่จ่าย (แท็บ "รอบบิลนี้") — มาจากสามที่
-   *   • รายจ่ายที่ผูกใบตรงๆ (card_statement_id) = ที่ผู้ใช้ย้ายเข้ามาหลังออกบิล ย้ายกลับได้
-   *   • รายจ่ายที่วันที่รูดอยู่ในช่วงของใบและไม่ได้ผูกใบอื่น = ของเดิมของรอบนั้น
-   *     (รวมค่างวดที่ถูกแปลงเป็นรายจ่ายตอนปิดรอบ) ธนาคารเก็บในใบนี้อยู่แล้ว ย้ายไม่ได้
+   * รายการของบิลใบที่ออกไปแล้วและยังไม่จ่าย (แท็บ "รอบบิลนี้") — มาจากสองที่
+   *   • รายจ่ายที่ผูกกับใบ (card_statement_id) — ผูกตอนปิดรอบ หรือผู้ใช้ย้ายเข้ามาเอง
    *   • เงินสดที่กดจากบัตรซึ่งถูกเก็บในใบนี้
+   *
+   * ดูที่การผูกอย่างเดียว ไม่เดาจากช่วงวันที่อีกแล้ว — รายการที่คีย์ย้อนวันเข้าไปใน
+   * รอบที่ปิดไปแล้วไม่ได้อยู่ในยอดของใบนั้น (ใบปิดไปตั้งแต่ก่อนมันเกิด) ถ้ายังเอามา
+   * แสดงในใบ มันจะถูกนับว่าจ่ายแล้วไปด้วยเมื่อใบนั้นจ่ายครบ ทั้งที่ยังไม่ได้จ่ายสักบาท
    */
   const billRows = useMemo(() => {
     if (!displayBill) return []
     const rows = transactions
-      .filter((t) => t.cardId === cardId && (
-        t.cardStatementId
-          ? t.cardStatementId === displayBill.id
-          : (t.date >= displayBill.periodStart && t.date <= displayBill.periodEnd)
-      ))
+      .filter((t) => t.cardId === cardId && t.cardStatementId === displayBill.id)
       .map((t) => ({
         key: `t-${t.id}`, tx: t, date: t.date, name: t.itemName || '(ไม่ระบุชื่อ)',
         cat: getCategoryName(t.category),
@@ -480,7 +477,6 @@ export default function CardDetailView({ cardId }) {
           : String(t.itemName ?? '').startsWith(FEE_PREFIX) ? 'ค่าธรรมเนียม'
           : t.type === 'income' ? 'เงินคืน' : 'รูดบัตร',
         amount: t.type === 'income' ? -Number(t.amount || 0) : Number(t.amount || 0),
-        movable: !!t.cardStatementId,
         // ในบิลที่ออกแล้ว "จ่ายยอดนี้" = จ่ายบิลด้วยยอดของรายการ (ไม่ใช่ขาจ่ายล่วงหน้า)
         // ค่างวดผ่อนก็จ่ายแบบนี้ได้ ต่างจากรอบที่ยังไม่ออกบิลซึ่งงวดยังไม่เป็นรายจ่าย
         // และมีปุ่มจ่ายค่างวดของตัวเองอยู่แล้ว — พองวดเข้าบิลไปแล้วมันคือยอดหนึ่งบรรทัด
@@ -1258,7 +1254,7 @@ export default function CardDetailView({ cardId }) {
           <div className="px-4 pb-1 pt-2.5 text-[11px] text-faint">
             {billTab === 'this'
               ? (hasBill
-                ? 'รายการที่ธนาคารเก็บในบิลใบนี้ · กด "จ่ายยอดนี้" เพื่อจ่ายบิลเฉพาะรายการนั้น (จ่ายแล้วจะขึ้นถูกสีเขียวหน้าแถว) · จ่ายไปแล้วก่อนหน้านี้แต่ระบบยังไม่รู้ว่าเป็นของบรรทัดไหน กด "ติ๊กว่าจ่ายแล้ว" ได้เลย ไม่ตัดเงินเพิ่ม · รายการที่ย้ายเข้ามาหลังออกบิลมีปุ่ม "ย้ายไปรอบบิลหน้า" ส่วนของเดิมตามวันที่รูดย้ายไม่ได้ · ติ๊กหน้าแถวเองคือทำเครื่องหมายว่าตรวจกับสลิปแล้ว (ไม่ตัดเงิน)'
+                ? 'รายการที่ธนาคารเก็บในบิลใบนี้ · กด "จ่ายยอดนี้" เพื่อจ่ายบิลเฉพาะรายการนั้น (จ่ายแล้วจะขึ้นถูกสีเขียวหน้าแถว) · จ่ายไปแล้วก่อนหน้านี้แต่ระบบยังไม่รู้ว่าเป็นของบรรทัดไหน กด "ติ๊กว่าจ่ายแล้ว" ได้เลย ไม่ตัดเงินเพิ่ม · รายการในใบย้ายออกไปรอบบิลหน้าได้ทุกแถว (บิลที่จ่ายจบแล้วต้องย้อนการจ่ายก่อน) · ติ๊กหน้าแถวเองคือทำเครื่องหมายว่าตรวจกับสลิปแล้ว (ไม่ตัดเงิน)'
                 : displayBill
                   ? 'บิลใบนี้จ่ายครบแล้ว — รายการยังอยู่ให้ไล่เช็คกับสลิปได้ ทุกบรรทัดติดเครื่องหมายว่าจ่ายแล้ว · พอถึงวันสรุปยอดรอบถัดไป รายการจากแท็บ "รอบบิลหน้า" จะมาแทนที่ตรงนี้'
                   : 'บัตรใบนี้ไม่มีบิลที่ต้องจ่าย · บิลใบถัดไปจะออกเองตอนสรุปยอด แล้วรายการจากแท็บ "รอบบิลหน้า" จะย้ายมาอยู่ที่นี่')
@@ -1425,19 +1421,17 @@ export default function CardDetailView({ cardId }) {
                         >
                           ย้ายไปรอบบิลนี้
                         </button>
-                      ) : r.movable ? (
+                      ) : (
                         <button
-                          disabled={busy}
+                          disabled={busy || !bill}
                           onClick={() => run(() => moveToNext(r))}
                           className="text-[10.5px] text-[#A93A2E] underline hover:no-underline whitespace-nowrap disabled:opacity-50"
-                          title="เอาออกจากบิลใบนี้ ไปรวมกับบิลรอบถัดไปตามวันที่รูด"
+                          title={bill
+                            ? 'เอาออกจากบิลใบนี้ ไปรวมกับบิลรอบถัดไปตามวันที่รูด'
+                            : 'บิลใบนี้จ่ายจบแล้ว เอารายการออกไม่ได้ — ย้อนการจ่ายก่อน'}
                         >
                           ย้ายไปรอบบิลหน้า
                         </button>
-                      ) : (
-                        <span className="text-[10px] text-faint whitespace-nowrap" title="วันที่รูดอยู่ในช่วงของบิลใบนี้ ธนาคารเก็บในใบนี้อยู่แล้ว">
-                          ตามวันที่รูด
-                        </span>
                       )
                     )}
                   </span>

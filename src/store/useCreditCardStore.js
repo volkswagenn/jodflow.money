@@ -474,16 +474,15 @@ const useCreditCardStore = create((set, get) => ({
    *   • เปลี่ยนวันสรุปยอดจนรอบใหม่กับรอบเก่าเหลื่อมกันหรือมีช่องว่าง
    * รายการที่ใบเก่าครอบอยู่แล้วต้องไม่ถูกนับซ้ำ ไม่ว่าช่วงวันที่ของรอบใหม่จะทับมันหรือไม่
    */
-  getUncoveredTransactions: (cardId, upTo) => {
-    const periods = get().statements
-      .filter((s) => s.cardId === cardId)
-      .map((s) => [s.periodStart, s.periodEnd])
-    const covered = (d) => periods.some(([a, b]) => d >= a && d <= b)
-    // รายการที่ถูกใส่เข้าบิลใบไหนไปแล้วตรงๆ (card_statement_id) ถือว่ามีใบครอบ
-    // ไม่ว่าวันที่ของมันจะอยู่ช่วงไหน — กฎเดียวกับ close_card_statement ฝั่งฐานข้อมูล
-    return useTransactionStore.getState().transactions
-      .filter((t) => t.cardId === cardId && t.date <= upTo && !t.cardStatementId && !covered(t.date))
-  },
+  getUncoveredTransactions: (cardId, upTo) =>
+    // ยังไม่ถูกผูกกับใบไหน = ยังไม่มีบิลไหนเก็บ — กฎเดียวกับ close_card_statement
+    // ฝั่งฐานข้อมูล (ดู supabase/card.sql ส่วนที่ 6 และ 18)
+    //
+    // เคยใช้ "วันที่ตกอยู่ในช่วงของใบไหนแล้ว" ซึ่งทำให้รายการที่คีย์ย้อนวันเข้าไปใน
+    // รอบที่ปิดไปแล้วหายจากทุกบิล — ใบเก่าปิดยอดไปตั้งแต่ก่อนรายการนั้นจะมี ส่วนบิล
+    // ใบหน้าก็ข้ามให้เพราะเห็นว่า "มีใบครอบวันนั้นแล้ว"
+    useTransactionStore.getState().transactions
+      .filter((t) => t.cardId === cardId && t.date <= upTo && !t.cardStatementId),
 
   /**
    * ใส่รายการรูดเข้าบิลใบที่ออกไปแล้ว / เอาออก
