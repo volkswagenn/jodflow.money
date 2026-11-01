@@ -2649,6 +2649,79 @@ update transactions t
         and t.created_at <= s.closed_at
    );
 
+-- ###########################################################################
+-- ##  วันครบกำหนดของงวดผ่อนต้องตามบิลและบัตร
+-- ###########################################################################
+-- due_date ของงวดถูกคำนวณครั้งเดียวตอนสร้างสัญญา แล้วไม่เคยขยับอีก พอแก้วันสรุปยอด
+-- หรือวันครบกำหนดของบัตรทีหลัง ป้ายงวดจึงบอกวันเก่าต่อไปตลอดสัญญา (เจอจริง: ป้ายบอก
+-- 15 พ.ย. แต่บิลครบกำหนด 4 พ.ย. เชื่อป้ายก็จ่ายช้าไป 11 วัน)
+--
+-- แก้เฉพาะวันที่บนงวด ไม่แตะ cycle ยอดเงิน หรือบิล — cycle คือตัวที่ตัวปิดรอบใช้เลือกงวด
+-- เข้าบิล ถ้าขยับตาม งวดอาจเข้าผิดใบหรือเข้าซ้ำได้
+
+-- รุ่น SQL ของ dueDateFor ใน src/lib/cardCycle.js — ต้องคิดเหมือนกันเป๊ะ
+-- วันที่เกินเดือนหนีบเป็นวันสุดท้ายของเดือน และวันครบกำหนดคือวัน due ครั้งแรกหลังวันสรุปยอด
+create or replace function public.card_cycle_due_date(
+  p_cycle text, p_closing int, p_due int
+) returns date language plpgsql immutable set search_path = public as $$
+declare
+  v_month   date := to_date(p_cycle || '-01', 'YYYY-MM-DD');
+  v_next    date := (v_month + interval '1 month')::date;
+  v_days    int  := v_next - v_month;
+  v_closing date := v_month + (least(p_closing, v_days) - 1);
+  v_same    date := v_month + (least(p_due, v_days) - 1);
+begin
+  if v_same > v_closing then return v_same; end if;
+  return v_next + (least(p_due, ((v_next + interval '1 month')::date - v_next)) - 1);
+end;
+$$;
+
+-- เข้าบิลแล้ว = ตามวันบนบิล เพราะบิลคือสิ่งที่ต้องจ่ายจริง · ยังไม่เข้าบิล = คิดจากรอบกับวันของบัตร
+-- งวดที่จ่ายตรงจากบัญชีแล้ว (paid) ไม่แตะ — หน้าจอใช้เทียบว่าจ่ายทันกำหนดตอนนั้นไหม
+create or replace function public.sync_card_entry_due_dates(p_card uuid)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  update card_installment_entries e
+     set due_date = s.due_date
+    from card_installments i, card_statements s
+   where e.installment_id = i.id and i.card_id = p_card
+     and s.id = e.statement_id
+     and e.status not in ('paid', 'cancelled')
+     and e.due_date is distinct from s.due_date;
+
+  update card_installment_entries e
+     set due_date = card_cycle_due_date(e.cycle, c.closing_day, c.due_day)
+    from card_installments i, credit_cards c
+   where e.installment_id = i.id and i.card_id = p_card
+     and c.id = i.card_id
+     and e.statement_id is null
+     and e.status not in ('paid', 'cancelled')
+     and e.due_date is distinct from card_cycle_due_date(e.cycle, c.closing_day, c.due_day);
+end;
+$$;
+
+-- เรียกผ่าน trigger และการซ่อมข้างล่างเท่านั้น ไม่เปิดเป็น RPC
+revoke all on function public.sync_card_entry_due_dates(uuid) from public, anon, authenticated;
+
+create or replace function public.credit_cards_sync_entry_due_dates() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  perform sync_card_entry_due_dates(new.id);
+  return null;
+end;
+$$;
+
+-- ฟอร์มแก้บัตรส่งทุกช่องมาทุกครั้ง จึงต้องเช็คว่าค่าเปลี่ยนจริง ไม่ใช่แค่อยู่ในคำสั่ง update
+drop trigger if exists credit_cards_entry_due_dates on credit_cards;
+create trigger credit_cards_entry_due_dates
+  after update of closing_day, due_day on credit_cards
+  for each row
+  when (old.closing_day is distinct from new.closing_day or old.due_day is distinct from new.due_day)
+  execute function credit_cards_sync_entry_due_dates();
+
+-- ซ่อมงวดเดิมที่วันเพี้ยนไปแล้ว รันซ้ำได้ ครั้งถัดไปจะไม่มีแถวให้เปลี่ยน
+select sync_card_entry_due_dates(id) from credit_cards;
+
 notify pgrst, 'reload schema';
 
 -- ตรวจผล: สองบรรทัดที่ต้องเป็น 0 คือของที่ "อยู่ในยอดใบแล้วแต่ยังไม่ผูก" ถ้าไม่เป็น 0
@@ -2662,6 +2735,15 @@ select 'ค่างวดที่อยู่ในใบแล้วแต่
   from transactions t
   join card_installment_entries e on e.transaction_id = t.id
  where e.statement_id is not null and t.card_statement_id is null
+union all
+select 'งวดที่วันครบกำหนดไม่ตรงกับบิลหรือบัตร (ต้องเป็น 0)',
+       count(*)::text || ' รายการ'
+  from card_installment_entries e
+  join card_installments i on i.id = e.installment_id
+  join credit_cards c on c.id = i.card_id
+  left join card_statements s on s.id = e.statement_id
+ where e.status not in ('paid', 'cancelled')
+   and e.due_date is distinct from coalesce(s.due_date, card_cycle_due_date(e.cycle, c.closing_day, c.due_day))
 union all
 select 'ยังไม่เข้าบิล (บิลใบหน้าจะเก็บให้)',
        count(*)::text || ' รายการ'

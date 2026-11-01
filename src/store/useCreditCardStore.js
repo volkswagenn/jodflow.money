@@ -70,8 +70,13 @@ const useCreditCardStore = create((set, get) => ({
   },
 
   updateCard: async (id, changes) => {
+    const before = get().cards.find((c) => c.id === id)
     const card = await cardApi.updateCreditCard(id, changes)
     set((s) => ({ cards: s.cards.map((c) => (c.id === id ? { ...c, ...card } : c)) }))
+    // เปลี่ยนวันของบัตร ฐานข้อมูลขยับวันที่งวดผ่อนตาม ต้องดึงงวดใหม่ ไม่งั้นป้ายยังบอกวันเก่า
+    if (before && (before.closingDay !== card.closingDay || before.dueDay !== card.dueDay)) {
+      await get().refresh()
+    }
     return card
   },
 
