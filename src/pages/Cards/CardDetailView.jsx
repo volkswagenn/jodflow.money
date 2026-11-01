@@ -824,15 +824,15 @@ export default function CardDetailView({ cardId }) {
     setUndoTarget(null)
   })
 
-  const handlePayEntry = ({ method, accountId, amount, date }) => run(async () => {
+  const handlePayEntry = ({ method, accountId, amount, paidAt }) => run(async () => {
     const { installment, entry } = payEntryTarget
     await payEntry(entry.id, {
-      method, accountId, amount, date,
+      method, accountId, amount, paidAt,
       log: buildLogEntry({
         activityType: 'INSTALLMENT_PAY',
         description: `จ่ายค่างวดที่ ${entry.seq}/${installment.months} "${installment.name}" ${fmt(amount)} บาท`,
         walletEffect: { target: method, delta: -amount, transferAccountId: accountId },
-        newValue: { installmentId: installment.id, entryId: entry.id, amount, date },
+        newValue: { installmentId: installment.id, entryId: entry.id, amount, paidAt },
       }),
     })
     await Promise.all([refreshWallet(), refreshCards()])
