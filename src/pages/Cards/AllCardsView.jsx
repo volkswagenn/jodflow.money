@@ -7,6 +7,7 @@ import Icon from '../../components/shared/Icon'
 import { formatCard } from '../../components/shared/CreditCardPicker'
 import { nextClosingDate, formatThaiDate, formatIsoThai, daysUntil } from '../../lib/cardCycle'
 import { localDateStr } from '../../lib/dateUtils'
+import { statusBand } from './cardStatus'
 
 const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })
 
@@ -34,7 +35,50 @@ export default function AllCardsView({ onOpenCard }) {
   const getStatementBreakdown = useCreditCardStore((s) => s.getStatementBreakdown)
   const getUnbilledInstallmentTotal = useCreditCardStore((s) => s.getUnbilledInstallmentTotal)
   const getCardLimitUsage = useCreditCardStore((s) => s.getCardLimitUsage)
+  const getCardBillStatus = useCreditCardStore((s) => s.getCardBillStatus)
   const [filter, setFilter] = useState('billed')
+
+  // สามกลุ่มตามสิ่งที่ต้องทำ — ตอบ "ใบไหนกำลังถูกเรียกเก็บ ใบไหนจ่ายแล้ว" ในหน้าเดียว
+  const withStatus = cards.map((card) => {
+    const st = getCardBillStatus(card.id)
+    return { card, st, band: statusBand(st) }
+  })
+  const billingRows = withStatus
+    .filter((x) => x.st.kind === 'billing' || x.st.kind === 'partial')
+    .sort((x, y) => x.st.days - y.st.days)
+  const statusGroups = [
+    {
+      key: 'billing', title: 'กำลังเรียกเก็บ', icon: 'schedule', tile: 'bg-[#C03A2D] text-white',
+      total: fmt(billingRows.reduce((n, x) => n + x.st.amount, 0)), totalTone: 'text-[#C03A2D]',
+      rows: billingRows.map((x) => ({
+        ...x,
+        note: `ครบกำหนด ${formatIsoThai(x.st.dueDate)} · ${x.band.text.split(' · ').pop()}`,
+        noteTone: x.st.days <= 3 ? 'text-[#C03A2D] font-medium' : 'text-faint',
+        amountTone: 'text-[#C03A2D]',
+      })),
+      empty: 'ไม่มีบิลที่กำลังเรียกเก็บ',
+    },
+    {
+      key: 'paid', title: 'จ่ายแล้วรอบนี้', icon: 'check_circle', tile: 'bg-lime text-ink',
+      rows: withStatus.filter((x) => x.st.kind === 'paid').map((x) => ({
+        ...x,
+        note: x.band.text,
+        noteTone: 'text-[#4C5A1E]',
+        amountTone: x.st.amount > 0 ? 'text-ink' : 'text-faint',
+      })),
+      empty: 'ยังไม่มีบัตรที่จ่ายบิลรอบนี้',
+    },
+    {
+      key: 'quiet', title: 'ยังไม่มีบิลรอบนี้', icon: 'credit_card', tile: 'bg-paper text-[#5F646C]',
+      rows: withStatus.filter((x) => x.st.kind === 'open' || x.st.kind === 'none').map((x) => ({
+        ...x,
+        note: x.band.text,
+        noteTone: 'text-faint',
+        amountTone: x.st.amount > 0 ? 'text-ink' : 'text-faint',
+      })),
+      empty: 'ไม่มี',
+    },
+  ]
 
   const rows = useMemo(() => {
     const today = localDateStr()
@@ -123,6 +167,39 @@ export default function AllCardsView({ onOpenCard }) {
           <div className="tabular-nums text-[22px] font-semibold text-[#3F444C] mt-0.5">{fmt(insTotal)}</div>
         </div>
       </div>
+
+      {cards.length > 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-2.5 items-start">
+          {statusGroups.map((g) => (
+            <section key={g.key} className="card px-[15px] py-3.5 flex flex-col gap-1 min-w-0">
+              <div className="flex items-center gap-2 pb-2">
+                <span className={`w-[26px] h-[26px] flex-none rounded-lg flex items-center justify-center ${g.tile}`}>
+                  <Icon name={g.icon} size={17} fill />
+                </span>
+                <span className="flex-1 min-w-0 text-[13.5px] font-semibold">{g.title}</span>
+                <span className={`tabular-nums text-[12.5px] font-bold ${g.totalTone ?? 'text-muted'}`}>
+                  {g.total ?? `${g.rows.length} ใบ`}
+                </span>
+              </div>
+              {g.rows.length === 0 ? (
+                <p className="text-[11.5px] text-faint border-t border-[#F2F0EA] pt-2">{g.empty}</p>
+              ) : g.rows.map((r) => (
+                <button
+                  key={r.card.id}
+                  onClick={() => onOpenCard(r.card.id)}
+                  className="w-full min-h-[46px] flex items-center gap-2.5 border-t border-[#F2F0EA] px-1 py-1.5 text-left hover:bg-paper"
+                >
+                  <span className="flex-1 min-w-0">
+                    <span className="block text-[12.5px] font-medium truncate">{formatCard(r.card)}</span>
+                    <span className={`block text-[11px] truncate ${r.noteTone}`}>{r.note}</span>
+                  </span>
+                  <span className={`tabular-nums flex-none text-[13px] font-semibold ${r.amountTone}`}>{fmt(r.st.amount)}</span>
+                </button>
+              ))}
+            </section>
+          ))}
+        </div>
+      )}
 
       <div className="flex items-center gap-2 flex-wrap">
         {Object.entries(FILTERS).map(([key, f]) => {

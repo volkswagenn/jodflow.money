@@ -10,6 +10,7 @@ import useDebtStore from '../../store/useDebtStore'
 import { formatIsoThaiShort } from '../../lib/cardCycle'
 import AppIcon from '../../components/shared/AppIcon'
 import { DEFAULT_ICONS } from '../../lib/defaultIcons'
+import { statusBand } from './cardStatus'
 
 const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })
 
@@ -28,6 +29,7 @@ export default function CardsPage() {
   const cards = useCreditCardStore((s) => s.cards)
   const ensureStatements = useCreditCardStore((s) => s.ensureStatements)
   const getNextDue = useCreditCardStore((s) => s.getNextDue)
+  const getCardBillStatus = useCreditCardStore((s) => s.getCardBillStatus)
   // เกาะไว้ให้ชิปคำนวณใหม่เมื่อบิล/รายการ/งวดเปลี่ยน — getNextDue อ่านจากพวกนี้
   useCreditCardStore((s) => s.statements)
   useCreditCardStore((s) => s.entries)
@@ -51,24 +53,30 @@ export default function CardsPage() {
   // เป็น 0.00 จนกว่ารอบจะปิด ทั้งที่มีค่างวดรออยู่ในบิลใบหน้า ดูแล้วเหมือนไม่มีข้อมูล
   const nextDues = cards.map((c) => getNextDue(c.id))
   const nextTotal = nextDues.reduce((n, d) => n + (d?.amount ?? 0), 0)
-  const dueUnit = (d) => {
+  const statuses = cards.map((c) => getCardBillStatus(c.id))
+  const billingCount = statuses.filter((st) => st.kind === 'billing' || st.kind === 'partial').length
+  const paidCount = statuses.filter((st) => st.kind === 'paid').length
+  const dueUnit = (d, st) => {
     if (!d || d.amount <= 0) return 'ไม่มียอดรอจ่าย'
-    return d.kind === 'closed'
-      ? `บิลครบกำหนด ${formatIsoThaiShort(d.dueDate)}`
-      : `รอบนี้ · จ่าย ${formatIsoThaiShort(d.dueDate)}`
+    if (d.kind === 'closed') return `บิลครบกำหนด ${formatIsoThaiShort(d.dueDate)}`
+    // จ่ายบิลรอบนี้ไปแล้ว ยอดที่เห็นคือของรอบหน้า ถ้ายังเขียนว่า "รอบนี้" จะดูเหมือนยังไม่ได้จ่าย
+    return `${st.kind === 'paid' ? 'รอบหน้า' : 'รอบนี้'} · จ่าย ${formatIsoThaiShort(d.dueDate)}`
   }
+  const QUIET_BAND = { bg: '#F4F3EF', fg: '#3C4048', bgOn: '#2A2E35', fgOn: '#C9CDD2' }
 
   const tabs = [
     {
       key: 'all', grow: 1, icon: 'credit_card', iconFg: '#16181D',
       label: 'รวมทุกบัตร', kicker: `${cards.length} ใบ`,
       sub: fmt(nextTotal), unit: 'ต้องจ่ายถัดไปรวม',
+      band: { ...QUIET_BAND, text: `เรียกเก็บ ${billingCount} ใบ · จ่ายแล้ว ${paidCount} ใบ` },
     },
     ...cards.map((c, i) => ({
       key: c.id, grow: 1.2, cardIcon: c.icon ?? null, isCard: true,
       label: c.last4 ? `${c.bankName || c.name} · ${c.last4}` : (c.name || 'บัตร'),
       kicker: c.name || 'บัตรเครดิต',
-      sub: fmt(nextDues[i]?.amount ?? 0), unit: dueUnit(nextDues[i]),
+      sub: fmt(nextDues[i]?.amount ?? 0), unit: dueUnit(nextDues[i], statuses[i]),
+      band: statusBand(statuses[i]),
       // บิลที่ปิดรอบแล้วต้องจ่ายตามกำหนด — ให้ตัวเลขเป็นสีแดงเหมือนหน้าบิล
       subTone: nextDues[i]?.kind === 'closed' && nextDues[i].amount > 0 ? 'text-[#C03A2D]' : '',
     })),
@@ -76,6 +84,7 @@ export default function CardsPage() {
       key: 'debt', grow: 1, icon: 'receipt_long', iconFg: '#6D4AA8',
       label: 'หนี้สินและงวดผ่อน', kicker: 'สัญญาผ่อน เงินกู้',
       sub: String(activeDebts), unit: 'สัญญาที่ยังผ่อนอยู่',
+      band: { ...QUIET_BAND, text: 'ไม่ผูกกับรอบบิลบัตร' },
     },
   ]
 
@@ -119,32 +128,43 @@ export default function CardsPage() {
               key={t.key}
               onClick={() => setView(t.key)}
               style={{ flex: `${t.grow} 1 0` }}
-              title={`${t.label} · ${t.kicker} · ${t.sub} ${t.unit}`}
-              className={`min-w-[212px] max-w-[340px] flex items-center gap-2.5 rounded-[14px] border px-[11px] py-[9px] text-left transition ${
+              title={`${t.label} · ${t.kicker} · ${t.sub} ${t.unit} · ${t.band.text}`}
+              className={`min-w-[212px] max-w-[340px] flex flex-col overflow-hidden rounded-[14px] border text-left transition ${
                 on ? 'border-ink shadow-[0_0_0_1px_#16181D] bg-ink' : 'border-hairline bg-white hover:border-ink'
               }`}
             >
-              <span className={`w-[34px] h-[34px] flex-none rounded-[10px] flex items-center justify-center ${
-                on ? 'bg-white/[0.12]' : 'bg-paper'
-              }`}>
-                {t.isCard
-                  // ไอคอนที่ตั้งไว้กับบัตร หรือรูปบัตรกลางๆ ถ้ายังไม่เลือก — ไม่เดาโลโก้จากชื่อธนาคาร
-                  ? <AppIcon value={t.cardIcon} size={19} fallback={DEFAULT_ICONS.card} />
-                  : <Icon name={t.icon} size={19} style={{ color: on ? '#C7F250' : t.iconFg }} />}
-              </span>
-              <span className="flex-1 min-w-0">
-                <span className={`block text-[12.5px] font-semibold truncate leading-[1.3] ${on ? 'text-white' : ''}`}>
-                  {t.label}
-                </span>
-                <span className={`block text-[10.5px] truncate ${on ? 'text-[#9AA0A8]' : 'text-faint'}`}>{t.kicker}</span>
-              </span>
-              <span className="flex-none text-right">
-                <span className={`tabular-nums block text-sm font-bold leading-[1.2] ${
-                  on ? 'text-[#C7F250]' : (t.subTone ?? '')
+              <span className="w-full flex items-center gap-2.5 px-[11px] py-[9px]">
+                <span className={`w-[34px] h-[34px] flex-none rounded-[10px] flex items-center justify-center ${
+                  on ? 'bg-white/[0.12]' : 'bg-paper'
                 }`}>
-                  {t.sub}
+                  {t.isCard
+                    // ไอคอนที่ตั้งไว้กับบัตร หรือรูปบัตรกลางๆ ถ้ายังไม่เลือก — ไม่เดาโลโก้จากชื่อธนาคาร
+                    ? <AppIcon value={t.cardIcon} size={19} fallback={DEFAULT_ICONS.card} />
+                    : <Icon name={t.icon} size={19} style={{ color: on ? '#C7F250' : t.iconFg }} />}
                 </span>
-                <span className={`block text-[10px] whitespace-nowrap ${on ? 'text-[#9AA0A8]' : 'text-faint'}`}>{t.unit}</span>
+                <span className="flex-1 min-w-0">
+                  <span className={`block text-[12.5px] font-semibold truncate leading-[1.3] ${on ? 'text-white' : ''}`}>
+                    {t.label}
+                  </span>
+                  <span className={`block text-[10.5px] truncate ${on ? 'text-[#9AA0A8]' : 'text-faint'}`}>{t.kicker}</span>
+                </span>
+                <span className="flex-none text-right">
+                  <span className={`tabular-nums block text-sm font-bold leading-[1.2] ${
+                    on ? 'text-[#C7F250]' : (t.subTone ?? '')
+                  }`}>
+                    {t.sub}
+                  </span>
+                  <span className={`block text-[10px] whitespace-nowrap ${on ? 'text-[#9AA0A8]' : 'text-faint'}`}>{t.unit}</span>
+                </span>
+              </span>
+              {/* แถบสถานะรอบบิล — ไล่ดูแถวเดียวก็รู้ว่าใบไหนกำลังถูกเรียกเก็บ ใบไหนจ่ายแล้ว
+                  ไม่ต้องกดเข้าไปทีละใบ · ใช้ตัวหนังสือกับไอคอนคู่กับสี ไม่ได้บอกด้วยสีอย่างเดียว */}
+              <span
+                className="w-full min-h-[26px] flex items-center gap-[5px] px-[11px] text-[11px] font-semibold"
+                style={{ background: on ? (t.band.bgOn ?? t.band.bg) : t.band.bg, color: on ? (t.band.fgOn ?? t.band.fg) : t.band.fg }}
+              >
+                {t.band.icon && <Icon name={t.band.icon} size={15} fill />}
+                <span className="truncate">{t.band.text}</span>
               </span>
             </button>
           )

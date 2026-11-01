@@ -3,7 +3,7 @@ import { assertCanPay } from '../lib/balanceGuard'
 import * as cardApi from '../lib/api/creditCards'
 import * as stmtApi from '../lib/api/cardStatements'
 import * as instApi from '../lib/api/cardInstallments'
-import { cyclePeriod, pendingCycles, toDateString, clampedDate, dueDateFor, cycleKey } from '../lib/cardCycle'
+import { cyclePeriod, pendingCycles, toDateString, clampedDate, dueDateFor, cycleKey, daysUntil } from '../lib/cardCycle'
 import useTransactionStore from './useTransactionStore'
 
 /**
@@ -578,6 +578,50 @@ const useCreditCardStore = create((set, get) => ({
       cycle: cur.cycle,
       current: cur,
     }
+  },
+
+  /**
+   * สถานะรอบบิลของบัตรหนึ่งใบ — ตอบว่า "ใบนี้กำลังถูกเรียกเก็บ หรือจ่ายไปแล้ว"
+   *
+   *   billing / partial  มีบิลค้าง (partial = จ่ายเข้าไปแล้วบางส่วน)
+   *   paid               บิลล่าสุดจ่ายครบด้วยเงินจริง แสดงจนกว่าบิลใบถัดไปจะออก
+   *   open               ยังไม่มีบิลให้พูดถึง แต่มียอดสะสมในรอบที่ยังไม่ปิด
+   *   none               ไม่มีอะไรเลย
+   *
+   * "paid" ต้องเช็ค paidAmount > 0 ด้วย — บิลที่ปิดรอบตอนไม่มีรายการ ยอด 0 ถูกตั้งสถานะ
+   * จ่ายแล้วให้เอง ทั้งที่ไม่มีเงินออกไปสักบาท ถ้านับรวม บัตรที่ไม่ได้ใช้จะขึ้นว่าจ่ายแล้วทุกเดือน
+   */
+  getCardBillStatus: (cardId) => {
+    const next = get().getNextDue(cardId)
+    const amount = next?.amount ?? 0
+    if (next?.kind === 'closed') {
+      const paid = Number(next.statement.paidAmount) || 0
+      return {
+        kind: paid > 0 ? 'partial' : 'billing',
+        statement: next.statement,
+        amount,
+        paid,
+        dueDate: next.dueDate,
+        days: daysUntil(new Date(`${next.dueDate}T00:00:00`)),
+      }
+    }
+    const last = get().statements
+      .filter((s) => s.cardId === cardId)
+      .sort((x, y) => (x.periodEnd < y.periodEnd ? 1 : -1))[0]
+    if (last?.status === 'paid' && Number(last.paidAmount) > 0) {
+      return {
+        kind: 'paid',
+        statement: last,
+        amount,
+        paid: Number(last.paidAmount),
+        paidAt: last.paidAt ?? null,
+        dueDate: next?.dueDate ?? null,
+      }
+    }
+    if (amount > 0) {
+      return { kind: 'open', amount, closing: next.current?.end ?? null, dueDate: next.dueDate }
+    }
+    return { kind: 'none', amount: 0, dueDate: next?.dueDate ?? null }
   },
 
   /**

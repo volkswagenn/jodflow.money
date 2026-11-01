@@ -28,6 +28,7 @@ import InstallmentFormPopup from '../../components/shared/InstallmentFormPopup'
 import InstallmentHistoryPopup from '../../components/shared/InstallmentHistoryPopup'
 import RowMenu from '../../components/shared/RowMenu'
 import EntryPips from '../../components/shared/EntryPips'
+import { statusBand } from './cardStatus'
 import { MONTHS_TH } from '../Manage/CardFormPopup'
 
 const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })
@@ -163,6 +164,8 @@ export default function CardDetailView({ cardId }) {
     [statements, isPayableStatement]
   )
   const bill = unpaid[0] ?? null
+  const billStatus = useCreditCardStore.getState().getCardBillStatus(cardId)
+  const billBand = statusBand(billStatus)
   // บิลที่ย้ายรายการเข้าไปได้ — รวมบิลเปล่าที่ระบบตั้งว่าจ่ายแล้วเพราะยอด 0 (ดู store)
   const attachable = useMemo(
     () => useCreditCardStore.getState().getAttachableStatements(cardId),
@@ -912,11 +915,18 @@ export default function CardDetailView({ cardId }) {
 
           <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)_minmax(0,1fr)]">
             {/* คอลัมน์ 1 — บิลที่ปิดรอบแล้วและต้องจ่าย */}
-            <div className={`px-4 py-3.5 flex flex-col gap-2.5 min-w-0 ${bill ? 'bg-expense-soft' : ''}`}>
+            <div className={`px-4 py-3.5 flex flex-col gap-2.5 min-w-0 ${bill ? 'bg-expense-soft' : billStatus.kind === 'paid' ? 'bg-[#F2FAD9]' : ''}`}>
               {bill ? (
                 <>
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-[11.5px] font-semibold text-[#A93A2E]">ยอดที่ต้องชำระ</span>
+                    <span
+                      className="flex-none flex items-center gap-1 h-[22px] px-2 rounded-full text-[11px] font-semibold"
+                      style={{ background: billBand.bg === '#FBE9E7' ? '#FFFFFF' : billBand.bg, color: billBand.fg }}
+                    >
+                      <Icon name={billBand.icon} size={14} fill />
+                      {billBand.text}
+                    </span>
                     {unpaid.length > 1 && (
                       <span className="tabular-nums flex-none text-[11px] font-bold bg-white border border-[#F0C4BE] text-[#A93A2E] rounded-full px-2">
                         ค้างอีก {unpaid.length - 1} รอบ
@@ -959,6 +969,36 @@ export default function CardDetailView({ cardId }) {
                   <span className="text-[11px] text-[#8A6A15] leading-[1.45]">
                     ปิดรอบแล้ว ยอดนิ่ง · จ่ายขั้นต่ำได้ แต่ระยะปลอดดอกเบี้ยจะหายไป
                   </span>
+                </>
+              ) : billStatus.kind === 'paid' ? (
+                // จ่ายบิลรอบนี้แล้ว — เดิมขึ้นแค่ "ยอดที่ต้องชำระ 0.00" ซึ่งแยกไม่ออกจากบัตรที่ไม่ได้ใช้เลย
+                <>
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-[38px] h-[38px] flex-none rounded-[12px] bg-lime flex items-center justify-center">
+                      <Icon name="check_circle" size={24} fill />
+                    </span>
+                    <span className="text-[15px] font-bold">จ่ายบิลรอบนี้แล้ว</span>
+                  </div>
+                  <div>
+                    <div className="tabular-nums text-[28px] font-semibold tracking-[-0.03em] leading-[1.1]">
+                      {fmt(billStatus.paid)}
+                    </div>
+                    <div className="text-[11.5px] text-[#4C5A1E] mt-[3px] leading-[1.45]">
+                      {billStatus.paidAt ? `จ่ายเมื่อ ${formatIsoThai(billStatus.paidAt)} · ` : ''}
+                      บิลครบกำหนด {formatIsoThai(billStatus.statement.dueDate)}
+                    </div>
+                    <div className="text-[11.5px] text-[#4C5A1E] leading-[1.45]">
+                      ไม่มียอดต้องจ่ายจนกว่าจะถึงบิลถัดไป
+                      {current ? ` — ครบกำหนด ${formatThaiDate(current.due)}` : ''}
+                    </div>
+                  </div>
+                  <button
+                    className="self-start flex items-center gap-1 text-[11.5px] text-[#4C5A1E] underline hover:no-underline"
+                    onClick={() => setUndoTarget(billStatus.statement)}
+                  >
+                    <Icon name="undo" size={15} />
+                    ย้อนการจ่าย
+                  </button>
                 </>
               ) : (
                 <>
