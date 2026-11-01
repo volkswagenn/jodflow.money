@@ -4,6 +4,7 @@ import AmountInput from '../../components/shared/AmountInput'
 import useWalletStore from '../../store/useWalletStore'
 import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
 import DateTimeField, { toTimestamp, todayDate } from '../../components/shared/DateTimeField'
+import SlipPicker from '../../components/shared/SlipPicker'
 import { formatIsoThai } from '../../lib/cardCycle'
 
 const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })
@@ -23,6 +24,7 @@ export default function PayInstallmentPopup({ installment, entry, card, onConfir
   const [amount, setAmount] = useState(String(entry?.amount ?? ''))
   const [date, setDate] = useState(todayDate())
   const [time, setTime] = useState('')
+  const [slipFiles, setSlipFiles] = useState([])
   const [error, setError] = useState('')
 
   const resolveAccount = useWalletStore((s) => s.resolveTransferAccountId)
@@ -46,6 +48,7 @@ export default function PayInstallmentPopup({ installment, entry, card, onConfir
       accountId: resolvedAccount,
       amount: parsed,
       paidAt: toTimestamp(date, time),
+      slipFiles,
     })
   }
 
@@ -112,6 +115,8 @@ export default function PayInstallmentPopup({ installment, entry, card, onConfir
           time={time}
           onChange={(v) => { setDate(v.date); setTime(v.time); setError('') }}
         />
+
+        <SlipPicker files={slipFiles} onChange={setSlipFiles} disabled={busy} />
 
         {willBeNegative && (
           <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">

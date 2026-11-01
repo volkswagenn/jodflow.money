@@ -1,5 +1,6 @@
 import Popup from './Popup'
 import UiIcon from './UiIcon'
+import SlipPicker from './SlipPicker'
 import { useState } from 'react'
 import { format } from 'date-fns'
 import useWalletStore from '../../store/useWalletStore'
@@ -14,7 +15,7 @@ const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigit
  * ให้เห็นก่อนกดยืนยันว่าหลังจ่ายแล้วคงเหลือเท่าไร เหลือกี่งวด งวดถัดไปวันไหน
  * และเงินในกระเป๋าที่เลือกจะเหลือเท่าไร
  *
- * onConfirm({ method, accountId, amount, date })
+ * onConfirm({ method, accountId, amount, date, slipFiles })
  */
 export default function PayDebtPopup({ debt, entry, progress, onConfirm, onCancel, busy }) {
   const isRecv = debt.direction === 'receivable'
@@ -22,6 +23,7 @@ export default function PayDebtPopup({ debt, entry, progress, onConfirm, onCance
   const [accountId, setAccountId] = useState(debt.defaultAccountId || '')
   const [amount, setAmount] = useState(String(entry.amount))
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'))
+  const [slipFiles, setSlipFiles] = useState([])
   const [error, setError] = useState('')
 
   const cash = useWalletStore((s) => s.cash)
@@ -41,7 +43,7 @@ export default function PayDebtPopup({ debt, entry, progress, onConfirm, onCance
     if (busy) return
     if (!(value > 0)) return setError('ใส่จำนวนเงิน')
     if (method === 'transfer' && !resolved) return setError('เลือกบัญชี')
-    onConfirm({ method, accountId: resolved, amount: value, date })
+    onConfirm({ method, accountId: resolved, amount: value, date, slipFiles })
   }
 
   return (
@@ -109,6 +111,8 @@ export default function PayDebtPopup({ debt, entry, progress, onConfirm, onCance
           />
         </div>
       </div>
+
+      <SlipPicker files={slipFiles} onChange={setSlipFiles} disabled={busy} />
 
       {/* บอกผลหลังกด — เหลือกี่งวด ปิดสัญญาเมื่อไหร่ เงินในกระเป๋าจะเหลือเท่าไร */}
       <div className="flex-none rounded-ctl bg-paper px-3 py-2.5 text-[11.5px] flex flex-col gap-1">

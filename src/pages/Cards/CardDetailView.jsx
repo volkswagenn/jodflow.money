@@ -483,14 +483,14 @@ export default function CardDetailView({ cardId }) {
   const feeDue = hasFee && Number(card.annualFeeMonth) === new Date().getMonth() + 1 && !feeRecorded
 
   // ── การกระทำทั้งหมด (ยกมาจากหน้ากระเป๋าเงินเดิม ตรรกะเงินไม่เปลี่ยน) ──────
-  const handlePay = ({ method, accountId, amount, date }) => run(async () => {
+  const handlePay = ({ method, accountId, amount, date, slipFiles }) => run(async () => {
     const statement = payTarget
     const remaining = Number(statement.amount) - Number(statement.paidAmount)
     // เปิดมาจากปุ่ม "จ่ายยอดนี้" ของบรรทัดไหน ผูกขาที่จ่ายไว้กับรายการนั้น
     // ไม่งั้นยอดบิลลดลงเฉยๆ แต่บรรทัดที่จ่ายไปแล้วหน้าตาเหมือนเดิมทุกอย่าง
     const payingTx = payPreset?.transactionId ?? null
     await payStatement(statement.id, {
-      method, accountId, amount, date, transactionId: payingTx,
+      method, accountId, amount, date, transactionId: payingTx, slipFiles,
       log: buildLogEntry({
         activityType: 'CARD_PAYMENT',
         description:
@@ -732,10 +732,10 @@ export default function CardDetailView({ cardId }) {
   })
   const closePayBill = () => { setPayTarget(null); setPayPreset(null) }
 
-  const handlePrepay = ({ method, accountId, amount, date }) => run(async () => {
+  const handlePrepay = ({ method, accountId, amount, date, slipFiles }) => run(async () => {
     const { tx, name } = prepayTarget
     await prepayTransaction(tx.id, {
-      method, accountId, amount, date,
+      method, accountId, amount, date, slipFiles,
       log: buildLogEntry({
         activityType: 'CARD_PREPAY',
         description:
@@ -824,10 +824,10 @@ export default function CardDetailView({ cardId }) {
     setUndoTarget(null)
   })
 
-  const handlePayEntry = ({ method, accountId, amount, paidAt }) => run(async () => {
+  const handlePayEntry = ({ method, accountId, amount, paidAt, slipFiles }) => run(async () => {
     const { installment, entry } = payEntryTarget
     await payEntry(entry.id, {
-      method, accountId, amount, paidAt,
+      method, accountId, amount, paidAt, slipFiles,
       log: buildLogEntry({
         activityType: 'INSTALLMENT_PAY',
         description: `จ่ายค่างวดที่ ${entry.seq}/${installment.months} "${installment.name}" ${fmt(amount)} บาท`,

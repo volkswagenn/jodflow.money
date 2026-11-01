@@ -7,6 +7,7 @@ import TransferAccountPicker from './TransferAccountPicker'
 import { formatIsoThai } from '../../lib/cardCycle'
 import Popup from './Popup'
 import UiIcon from './UiIcon'
+import SlipPicker from './SlipPicker'
 
 const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })
 
@@ -17,7 +18,7 @@ const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigit
  * ปุ่มขั้นต่ำมีไว้ให้กดได้ แต่มีคำเตือนกำกับว่าระยะปลอดดอกเบี้ยจะหายไป
  * ซึ่งเป็นความเข้าใจผิดที่แพงที่สุดเรื่องบัตรเครดิต
  *
- * onConfirm({ method, accountId, amount, date })
+ * onConfirm({ method, accountId, amount, date, slipFiles })
  * preset = { amount, label } เปิดมาพร้อมยอดที่ตั้งไว้ (เช่นจ่ายเฉพาะรายการเดียวในบิล)
  */
 export default function PayCardBillPopup({ statement, cardLabel, onConfirm, onCancel, busy, preset = null }) {
@@ -28,6 +29,7 @@ export default function PayCardBillPopup({ statement, cardLabel, onConfirm, onCa
   const [accountId, setAccountId] = useState('')
   const [amount, setAmount] = useState(String(preset?.amount > 0 ? Math.min(preset.amount, remaining) : remaining))
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'))
+  const [slipFiles, setSlipFiles] = useState([])
   const [error, setError] = useState('')
 
   const resolveAccount = useWalletStore((s) => s.resolveTransferAccountId)
@@ -51,7 +53,7 @@ export default function PayCardBillPopup({ statement, cardLabel, onConfirm, onCa
     if (!(value > 0)) return setError('ใส่จำนวนเงินที่จะจ่าย')
     const resolved = method === 'transfer' ? resolveAccount(accountId) : null
     if (method === 'transfer' && !resolved) return setError('เลือกบัญชีที่จะจ่าย')
-    onConfirm({ method, accountId: resolved, amount: value, date })
+    onConfirm({ method, accountId: resolved, amount: value, date, slipFiles })
   }
 
   const isFull = Math.abs(value - remaining) < 0.005
@@ -158,6 +160,8 @@ export default function PayCardBillPopup({ statement, cardLabel, onConfirm, onCa
         <label className="block text-[11.5px] text-muted mb-[5px]">วันที่จ่าย</label>
         <DatePicker value={date} onChange={setDate} />
       </div>
+
+      <SlipPicker files={slipFiles} onChange={setSlipFiles} disabled={busy} />
 
       {preset?.label && Math.abs(value - Math.min(preset.amount, remaining)) < 0.005 && (
         <div className="flex-none bg-[#FAF9F6] border border-[#EFEDE7] rounded-ctl px-3 py-2.5 text-[11.5px] text-muted leading-relaxed">

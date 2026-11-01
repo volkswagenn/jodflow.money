@@ -5,6 +5,7 @@ import * as stmtApi from '../lib/api/cardStatements'
 import * as instApi from '../lib/api/cardInstallments'
 import { cyclePeriod, pendingCycles, toDateString, clampedDate, dueDateFor, cycleKey, daysUntil } from '../lib/cardCycle'
 import useTransactionStore from './useTransactionStore'
+import { attachSlipFiles } from '../lib/paymentSlipFiles'
 
 /**
  * บัตรเครดิตและใบแจ้งยอด
@@ -168,8 +169,17 @@ const useCreditCardStore = create((set, get) => ({
 
   payStatement: async (statementId, params) => {
     await assertCanPay(params)   // เงินไม่พอ / ไม่จ่ายต่อ → หยุดก่อนแตะเงิน
+    // RPC คืนตัวบิล ไม่ได้คืนขาที่เพิ่งจ่าย — สลิปต้องผูกกับขา จึงจำขาเดิมไว้แล้วหาตัวที่เพิ่มขึ้นมา
+    const legsBefore = new Set(get().statementPayments.map((l) => l.id))
     const statement = await stmtApi.payStatement(statementId, params)
     await get().refresh()
+    if (params.slipFiles?.length) {
+      const leg = get().statementPayments.find((l) => l.statementId === statementId && !legsBefore.has(l.id))
+      await attachSlipFiles({
+        kind: 'card_bill', refId: leg?.id ?? statementId, paidAt: leg?.paidAt ?? params.date,
+        title: `บิลบัตร ${get().getCardShortLabel(statement.cardId)}`, amount: params.amount, files: params.slipFiles,
+      })
+    }
     return statement
   },
 
@@ -186,6 +196,10 @@ const useCreditCardStore = create((set, get) => ({
   prepayTransaction: async (transactionId, params) => {
     const leg = await stmtApi.prepayTransaction(transactionId, params)
     await get().refresh()
+    await attachSlipFiles({
+      kind: 'card_bill', refId: leg.id, paidAt: leg.paidAt ?? params.date,
+      title: `บิลบัตร ${get().getCardShortLabel(leg.cardId)}`, amount: params.amount, files: params.slipFiles,
+    })
     return leg
   },
 
@@ -255,6 +269,11 @@ const useCreditCardStore = create((set, get) => ({
     await assertCanPay(params)   // เงินไม่พอ / ไม่จ่ายต่อ → หยุดก่อนแตะเงิน
     const entry = await instApi.payInstallmentEntry(entryId, params)
     await get().refresh()
+    await attachSlipFiles({
+      kind: 'card_installment', refId: entry.id, paidAt: entry.paidAt ?? params.paidAt ?? params.date,
+      title: get().installments.find((i) => i.id === entry.installmentId)?.name ?? 'ค่างวดผ่อน',
+      amount: params.amount, files: params.slipFiles,
+    })
     return entry
   },
 

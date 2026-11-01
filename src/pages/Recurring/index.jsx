@@ -24,6 +24,7 @@ import RecurringPausedCard from './RecurringPausedCard'
 import { localMonthStr } from '../../lib/dateUtils'
 import RecurringItemForm from './RecurringItemForm'
 import PayEntryPopup from './PayEntryPopup'
+import { attachSlipFiles } from '../../lib/paymentSlipFiles'
 
 const THAI_MONTHS = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.']
 
@@ -372,7 +373,7 @@ export default function RecurringPage() {
    * โดยไม่ await ทำให้ tx.id เป็น undefined entry จึงไม่เคยผูกกับรายการ (ยกเลิกไม่ได้)
    * และเงินถูกตัดแยกอีกคำสั่ง ถ้าอันใดอันหนึ่งล้มยอดจะไม่ตรง
    */
-  const executeMarkPaid = async (entry, item, amount, paidMethod, paidDate = format(new Date(), 'yyyy-MM-dd'), accountId = null, cardId = null, paidAt = null) => {
+  const executeMarkPaid = async (entry, item, amount, paidMethod, paidDate = format(new Date(), 'yyyy-MM-dd'), accountId = null, cardId = null, paidAt = null, slipFiles = []) => {
     if (busy) return
     // ด่านสุดท้ายกันจ่ายซ้ำ — ทุกเส้นทางที่ตัดเงินจริงผ่านฟังก์ชันนี้ ถ้ารอบนี้จ่ายไปแล้ว
     // การทำซ้ำคือสร้างรายการจ่ายใบที่สองและตัดเงินออกอีกรอบ ซึ่งตามเก็บทีหลังยาก
@@ -446,6 +447,10 @@ export default function RecurringPage() {
         transactionId: tx?.id ?? null,
         pendingPaymentId,
       })
+      await attachSlipFiles({
+        kind: 'recurring', refId: entry.id, title: item.name, amount, files: slipFiles,
+        paidAt: paidAt ?? new Date(`${paidDate}T12:00:00`).toISOString(),
+      })
 
       setPayTarget(null)
     } catch (err) {
@@ -455,12 +460,12 @@ export default function RecurringPage() {
     }
   }
 
-  const handlePayConfirm = async (amount, paidMethod, paidDate, accountId = null, cardId = null, paidAt = null) => {
+  const handlePayConfirm = async (amount, paidMethod, paidDate, accountId = null, cardId = null, paidAt = null, slipFiles = []) => {
     const { entry, item } = payTarget
     // ด่านยอดเงิน — บัตรเครดิตกับค้างชำระไม่ได้ตัดเงินจากที่ไหน ด่านจะปล่อยผ่านเอง
     // ไม่ผ่าน (เงินไม่พอ / ผู้ใช้ไม่จ่ายต่อ) ก็คงหน้าต่างจ่ายไว้ ให้เปลี่ยนแหล่งเงินได้เลย
     if (!(await ensureCanPay({ method: paidMethod, amount, accountId }))) return
-    executeMarkPaid(entry, item, amount, paidMethod, paidDate, accountId, cardId, paidAt)
+    executeMarkPaid(entry, item, amount, paidMethod, paidDate, accountId, cardId, paidAt, slipFiles)
   }
 
   const handleSaveEntryAmount = async (amount) => {

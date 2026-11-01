@@ -7,6 +7,7 @@ import TransferAccountPicker from './TransferAccountPicker'
 import { formatIsoThai } from '../../lib/cardCycle'
 import Popup from './Popup'
 import UiIcon from './UiIcon'
+import SlipPicker from './SlipPicker'
 
 const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })
 
@@ -18,7 +19,7 @@ const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigit
  * ป๊อปอัปนี้จึงเปิดมาพร้อมยอดเต็มของรายการ (เกือบทุกครั้งคือยอดที่โอนจริง)
  * แก้ได้แต่ห้ามเกินยอดของรายการ ถ้าอยากจ่ายเกินให้ไปที่ปุ่มจ่ายบิล
  *
- * onConfirm({ method, accountId, amount, date })
+ * onConfirm({ method, accountId, amount, date, slipFiles })
  */
 export default function PayCardItemPopup({ item, cardLabel, onConfirm, onCancel, busy }) {
   const remaining = Number(item.remaining)
@@ -27,6 +28,7 @@ export default function PayCardItemPopup({ item, cardLabel, onConfirm, onCancel,
   const [accountId, setAccountId] = useState('')
   const [amount, setAmount] = useState(String(remaining))
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'))
+  const [slipFiles, setSlipFiles] = useState([])
   const [error, setError] = useState('')
 
   const resolveAccount = useWalletStore((s) => s.resolveTransferAccountId)
@@ -46,7 +48,7 @@ export default function PayCardItemPopup({ item, cardLabel, onConfirm, onCancel,
     if (value > remaining + 0.005) return setError(`จ่ายได้ไม่เกินยอดของรายการ ${fmt(remaining)} บาท`)
     const resolved = method === 'transfer' ? resolveAccount(accountId) : null
     if (method === 'transfer' && !resolved) return setError('เลือกบัญชีที่จะจ่าย')
-    onConfirm({ method, accountId: resolved, amount: value, date })
+    onConfirm({ method, accountId: resolved, amount: value, date, slipFiles })
   }
 
   return (
@@ -140,6 +142,8 @@ export default function PayCardItemPopup({ item, cardLabel, onConfirm, onCancel,
         <label className="block text-[11.5px] text-muted mb-[5px]">วันที่จ่าย</label>
         <DatePicker value={date} onChange={setDate} />
       </div>
+
+      <SlipPicker files={slipFiles} onChange={setSlipFiles} disabled={busy} />
 
       {value > 0 && value < remaining - 0.005 && (
         <div className="flex-none bg-pending-soft border border-pending-line rounded-ctl px-3 py-2.5 text-[11.5px] text-[#8A6A15] leading-relaxed">

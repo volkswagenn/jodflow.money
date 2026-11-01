@@ -288,14 +288,14 @@ export default function InstallmentList({ bare = false }) {
   )
 
 
-  const handlePayEntry = async ({ method, accountId, amount, paidAt }) => {
+  const handlePayEntry = async ({ method, accountId, amount, paidAt, slipFiles }) => {
     const { installment, entry } = payEntryTarget
     if (busy) return
     setBusy(true)
     setError('')
     try {
       await payEntry(entry.id, {
-        method, accountId, amount, paidAt,
+        method, accountId, amount, paidAt, slipFiles,
         log: buildLogEntry({
           activityType: 'INSTALLMENT_PAY',
           description:
@@ -336,14 +336,14 @@ export default function InstallmentList({ bare = false }) {
     }
   }
 
-  const handlePayBill = async ({ method, accountId, amount, date }) => {
+  const handlePayBill = async ({ method, accountId, amount, date, slipFiles }) => {
     const statement = payTarget
     if (busy) return
     setBusy(true)
     setError('')
     try {
       await payStatement(statement.id, {
-        method, accountId, amount, date,
+        method, accountId, amount, date, slipFiles,
         log: buildLogEntry({
           activityType: 'CARD_PAYMENT',
           description:

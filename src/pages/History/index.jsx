@@ -1,12 +1,21 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { format, startOfMonth, endOfMonth } from 'date-fns'
 import { th } from 'date-fns/locale'
 import useLogStore from '../../store/useLogStore'
 import useTransactionStore from '../../store/useTransactionStore'
+import useCreditCardStore from '../../store/useCreditCardStore'
+import usePaymentHistory from '../../hooks/usePaymentHistory'
+import useSlipActions from '../../hooks/useSlipActions'
+import { slipsInstalled } from '../../lib/api/paymentSlips'
+import { paymentViewerItem, fileShortLabel, whenText } from '../../lib/paymentSlipView'
 import { ACTIVITY_LABELS } from '../../lib/logBuilder'
 import { localDateStr } from '../../lib/dateUtils'
 import Icon from '../../components/shared/Icon'
 import DateRangeFilter from '../../components/shared/DateRangeFilter'
+import FileUploadPopup from '../../components/shared/FileUploadPopup'
+import SlipImage from '../../components/shared/SlipImage'
+import SlipViewerPopup from '../../components/shared/SlipViewerPopup'
+import { getAttachments } from '../../components/shared/AttachmentViewer'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -14,6 +23,70 @@ const TX_LOG_TYPES = new Set([
   'ADD_INCOME', 'ADD_INCOME_MAIN', 'ADD_OTHER_INCOME',
   'ADD_EXPENSE', 'EDIT_INCOME', 'EDIT_EXPENSE',
 ])
+
+// บันทึกพวกนี้ชี้ไปที่รายการเงินใบหนึ่ง ซึ่งอาจมีใบเสร็จแนบอยู่
+const TX_FILE_TYPES = new Set([...TX_LOG_TYPES, 'RECURRING_PAID', 'UPLOAD_RECEIPT'])
+
+// บันทึกกับขาการจ่ายถูกเขียนในคำสั่งเดียวกัน เวลาจึงแทบตรงกัน เผื่อไว้สำหรับบันทึกรุ่นเก่า
+// ที่เขียนแยกคำสั่ง — ถ้าไม่จำกัด จ่ายแล้วย้อนแล้วจ่ายใหม่ยอดเดิม บันทึกครั้งแรก
+// (ซึ่งการจ่ายไม่มีอยู่แล้ว) จะไปโชว์สลิปของครั้งใหม่
+const LEG_MATCH_MS = 2 * 60 * 1000
+
+/**
+ * บันทึกนี้คือการจ่ายแถวไหน — คืน key เดียวกับ usePaymentHistory
+ *
+ * การจ่ายส่วนใหญ่บันทึก id ไว้ตรงๆ ยกเว้นจ่ายบิลบัตรที่บันทึก id ของใบ ซึ่งใบเดียวจ่ายได้
+ * หลายครั้ง จึงต้องหาขาจากใบ (หรือรายการ) ยอด และเวลา
+ */
+function paymentKeyOfLog(log, legs) {
+  const v = log.newValue ?? {}
+  switch (log.activityType) {
+    case 'ATTACH_PAYMENT_SLIP': return v.kind && v.refId ? `${v.kind}:${v.refId}` : null
+    case 'INSTALLMENT_PAY': return v.entryId ? `card_installment:${v.entryId}` : null
+    case 'DEBT_PAY':
+    case 'DEBT_RECEIVE': return v.entryId ? `debt:${v.entryId}` : null
+    case 'PAY_PENDING': return v.pendingId ? `pending:${v.pendingId}` : null
+    case 'RECURRING_PAID': return v.recurringEntryId ? `recurring:${v.recurringEntryId}` : null
+    case 'CARD_PAYMENT':
+    case 'CARD_AUTOPAY':
+    case 'CARD_PREPAY': {
+      const at = new Date(log.timestamp).getTime()
+      let best = null
+      let bestGap = LEG_MATCH_MS
+      for (const l of legs) {
+        const same = v.statementId ? l.statementId === v.statementId : (v.transactionId && l.transactionId === v.transactionId)
+        if (!same || Math.abs(Number(l.amount) - Number(v.amount)) > 0.005) continue
+        const gap = Math.abs(new Date(l.createdAt).getTime() - at)
+        if (gap <= bestGap) { best = l; bestGap = gap }
+      }
+      if (best) return `card_bill:${best.id}`
+      // ใบเก่าที่จ่ายก่อนระบบแยกเก็บทีละขา ประวัติการจ่ายใช้ id ของใบแทน
+      return v.statementId ? `card_bill:${v.statementId}` : null
+    }
+    default: return null
+  }
+}
+
+/** ใบเสร็จของรายการเงิน → สิ่งที่ SlipViewerPopup แสดง (แก้ไฟล์ที่ฟอร์มรายการ ไม่ใช่ตรงนี้) */
+function transactionViewerItem(tx, kindLabel) {
+  const files = getAttachments(tx)
+  const uploadedAt = files[0]?.uploadedAt
+  return {
+    key: `tx:${tx.id}`,
+    title: tx.itemName ?? 'รายการ',
+    kindLabel,
+    amount: Number(tx.amount || 0),
+    incoming: tx.type === 'income',
+    facts: [
+      ['วันที่', whenText(tx.date)],
+      ['ผู้ขาย', tx.vendor || '—'],
+      ['เลขที่ใบเสร็จ', tx.receiptNo || '—'],
+      ...(uploadedAt ? [['แนบเมื่อ', whenText(uploadedAt)]] : []),
+    ],
+    files,
+    row: null,
+  }
+}
 
 // ── AllTab ─────────────────────────────────────────────────────────────────────
 
@@ -62,6 +135,16 @@ function AllTab() {
   const [endDate, setEndDate] = useState(format(endOfMonth(new Date()), 'yyyy-MM-dd'))
   const [typeFilter, setTypeFilter] = useState('')
   const [search, setSearch] = useState('')
+  const [onlyFiles, setOnlyFiles] = useState(false)
+  const [viewKey, setViewKey] = useState(null)
+  const [uploadFor, setUploadFor] = useState(null)
+  const [slipError, setSlipError] = useState('')
+  const [busy, setBusy] = useState(false)
+  const legs = useCreditCardStore((s) => s.statementPayments)
+  const paymentRows = usePaymentHistory()
+  const { attachPaths, dropSlip } = useSlipActions()
+  const paymentByKey = useMemo(() => new Map(paymentRows.map((r) => [r.key, r])), [paymentRows])
+  const txById = useMemo(() => new Map(transactions.map((t) => [t.id, t])), [transactions])
 
   // log ที่ post_transaction เขียนจะมี newValue.transactionId (ฐานข้อมูลใส่ให้)
   // ส่วน log รุ่นเก่าเก็บทั้งรายการไว้ใน newValue จึงมี newValue.id — รับทั้งสองแบบ
@@ -82,16 +165,31 @@ function AllTab() {
       label: tx.type === 'income' ? 'ธุรกรรมรายรับ' : 'ธุรกรรมรายจ่าย',
       description: `${tx.type === 'income' ? 'รายรับ' : 'รายจ่าย'} "${tx.itemName ?? 'ไม่ระบุ'}" ${Number(tx.amount || 0).toLocaleString()} บาท`,
       walletEffect: { delta: tx.type === 'income' ? Number(tx.amount || 0) : -Number(tx.amount || 0) },
+      viewer: getAttachments(tx).length > 0 ? transactionViewerItem(tx, tx.type === 'income' ? 'รายรับ' : 'รายจ่าย') : null,
     }))
 
   const systemEvents = logs
-    .map((log) => ({
-      ...log,
-      id: `log:${log.id}`,
-      // timestamp เป็น ISO/UTC — ต้องแปลงเป็นวันที่ท้องถิ่นก่อนเทียบกับช่วงวันที่ที่ผู้ใช้เลือก
-      date: localDateStr(log.timestamp),
-      label: ACTIVITY_LABELS[log.activityType] ?? log.activityType,
-    }))
+    .map((log) => {
+      const label = ACTIVITY_LABELS[log.activityType] ?? log.activityType
+      const payment = paymentByKey.get(paymentKeyOfLog(log, legs)) ?? null
+      const tx = TX_FILE_TYPES.has(log.activityType)
+        ? txById.get(log.newValue?.transactionId ?? log.newValue?.id)
+        : null
+      // สลิปของการจ่ายมาก่อนใบเสร็จ — รายการประจำที่จ่ายแล้วมีได้ทั้งสองอย่าง
+      let viewer = null
+      if (payment && getAttachments(payment.slip).length > 0) viewer = paymentViewerItem(payment)
+      else if (tx && getAttachments(tx).length > 0) viewer = transactionViewerItem(tx, label)
+      return {
+        ...log,
+        id: `log:${log.id}`,
+        // timestamp เป็น ISO/UTC — ต้องแปลงเป็นวันที่ท้องถิ่นก่อนเทียบกับช่วงวันที่ที่ผู้ใช้เลือก
+        date: localDateStr(log.timestamp),
+        label,
+        viewer,
+        // การจ่ายที่ยังอยู่แต่ยังไม่มีสลิป แนบจากแถวนี้ได้เลย · บันทึก "แนบสลิป" ที่สลิปถูกเอาออกไปแล้วไม่ต้องชวนแนบ
+        attachTo: !viewer && payment && log.activityType !== 'ATTACH_PAYMENT_SLIP' ? payment : null,
+      }
+    })
 
   const typeOptions = [
     { value: '', label: 'ทุกประเภท' },
@@ -106,6 +204,7 @@ function AllTab() {
       const d = event.date || localDateStr(event.timestamp)
       if (d < startDate || d > endDate) return false
       if (typeFilter && event.activityType !== typeFilter) return false
+      if (onlyFiles && !event.viewer) return false
       if (search) {
         const haystack = [
           event.description,
@@ -118,6 +217,39 @@ function AllTab() {
       return true
     })
     .sort((a, b) => (b.timestamp ?? '').localeCompare(a.timestamp ?? ''))
+
+  // สลิปใบเดียวโผล่ได้หลายแถว (ตอนจ่าย + ตอนแนบ) กดถัดไปในตัวดูต้องไม่เจอใบเดิมซ้ำ
+  const seenViewers = new Set()
+  const viewerItems = events
+    .map((event) => event.viewer)
+    .filter((item) => {
+      if (!item || seenViewers.has(item.key)) return false
+      seenViewers.add(item.key)
+      return true
+    })
+
+  const attachSlip = async (row, paths) => {
+    setBusy(true); setSlipError('')
+    try {
+      await attachPaths(row, paths)
+    } catch (err) {
+      setSlipError(err.message)
+    } finally {
+      setBusy(false)
+      setUploadFor(null)
+    }
+  }
+
+  const removeSlip = async (row) => {
+    setBusy(true); setSlipError('')
+    try {
+      await dropSlip(row)
+    } catch (err) {
+      setSlipError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
 
   // ชิปกรองด่วน — ชนิดที่คนมองหาบ่อยที่สุด ส่วนที่เหลือยังเลือกจากรายการเต็มได้
   const QUICK = [
@@ -153,6 +285,16 @@ function AllTab() {
             </button>
           )
         })}
+        <button
+          onClick={() => setOnlyFiles((v) => !v)}
+          aria-pressed={onlyFiles}
+          className={`h-8 px-3 rounded-[9px] text-[12.5px] border flex items-center gap-1 transition ${
+            onlyFiles ? 'bg-ink text-white border-ink font-semibold' : 'bg-white text-muted border-hairline hover:bg-paper'
+          }`}
+        >
+          <Icon name="attach_file" size={15} />
+          มีไฟล์แนบ
+        </button>
         <select
           className="h-8 px-2.5 rounded-[9px] border border-hairline bg-white text-[12.5px] text-muted"
           value={QUICK.some((q) => q.value === typeFilter) ? '' : typeFilter}
@@ -171,6 +313,8 @@ function AllTab() {
           />
         </div>
       </div>
+
+      {slipError && <p className="text-[12.5px] text-expense bg-expense-soft border border-[#F0C4BE] rounded-ctl px-3.5 py-2.5">{slipError}</p>}
 
       <div className="card px-[18px] pt-1.5 pb-0 flex-1 min-h-0">
       {events.length === 0 ? (
@@ -207,15 +351,41 @@ function AllTab() {
                   </span>
                 </div>
 
-                <div className="flex items-baseline gap-2 pl-[40px] sm:pl-0 sm:contents">
+                <div className="flex items-center gap-2 pl-[40px] sm:pl-0 sm:contents">
                   <span className="sm:hidden tabular-nums text-[11px] text-faint">
                     {(() => { try { return format(new Date(event.timestamp), 'd MMM yy · HH:mm', { locale: th }) } catch { return event.date } })()}
                   </span>
-                  {delta != null && (
-                    <span className={`tabular-nums ml-auto sm:ml-0 flex-none text-[13px] font-semibold ${delta > 0 ? 'text-income' : 'text-expense'}`}>
+                  {/* คอลัมน์ไฟล์กว้างคงที่ ยอดเงินทุกแถวจะได้ตรงกันไม่ว่าแถวนั้นมีไฟล์หรือไม่ */}
+                  <span className="flex-none sm:w-[128px] flex sm:justify-end">
+                    {event.viewer && (
+                      <button
+                        onClick={() => setViewKey(event.viewer.key)}
+                        aria-label={`เปิด${fileShortLabel(event.viewer.files[0])}ของ ${event.viewer.title}`}
+                        className="h-11 pl-[3px] pr-[9px] rounded-[10px] border border-[#D8D4C9] bg-white flex items-center gap-[7px] transition hover:border-ink hover:shadow-card"
+                      >
+                        <SlipImage path={event.viewer.files[0]?.path} className="w-7 h-9 rounded-md border border-hairline" />
+                        <span className="text-[11.5px] font-semibold">
+                          {fileShortLabel(event.viewer.files[0])}
+                          {event.viewer.files.length > 1 && <span className="tabular-nums text-muted font-medium"> {event.viewer.files.length}</span>}
+                        </span>
+                      </button>
+                    )}
+                    {event.attachTo && slipsInstalled() && (
+                      <button
+                        onClick={() => setUploadFor(event.attachTo)}
+                        aria-label={`แนบสลิปของ ${event.attachTo.title}`}
+                        className="h-11 px-2.5 rounded-[10px] border border-dashed border-[#B9B5A9] bg-[#FAF9F6] text-[11.5px] font-semibold text-muted flex items-center gap-1 hover:border-ink hover:text-ink"
+                      >
+                        <Icon name="add" size={15} />
+                        แนบสลิป
+                      </button>
+                    )}
+                  </span>
+                  {delta != null ? (
+                    <span className={`tabular-nums ml-auto sm:ml-0 sm:w-[84px] sm:text-right flex-none text-[13px] font-semibold ${delta > 0 ? 'text-income' : 'text-expense'}`}>
                       {delta > 0 ? '+' : ''}{Number(delta).toLocaleString()}
                     </span>
-                  )}
+                  ) : <span className="hidden sm:block w-[84px] flex-none" />}
                 </div>
               </div>
             )
@@ -223,6 +393,33 @@ function AllTab() {
         </div>
       )}
       </div>
+
+      {viewKey && (
+        <SlipViewerPopup
+          items={viewerItems}
+          itemKey={viewKey}
+          onChangeItem={setViewKey}
+          onClose={() => setViewKey(null)}
+          onReplace={(row) => setUploadFor(row)}
+          onRemove={removeSlip}
+          busy={busy}
+        />
+      )}
+      {uploadFor && (
+        <FileUploadPopup
+          title="แนบสลิปการจ่าย"
+          description={`${uploadFor.title} · ${Number(uploadFor.amount ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })} บาท`}
+          createdAt={uploadFor.paidAt}
+          filenamePrefix="slip"
+          folderBase="slips"
+          onConfirm={(saved) => {
+            const paths = saved ? (Array.isArray(saved) ? saved : [saved]) : []
+            if (paths.length === 0) return setUploadFor(null)
+            attachSlip(uploadFor, paths)
+          }}
+          onCancel={() => setUploadFor(null)}
+        />
+      )}
     </div>
   )
 }
