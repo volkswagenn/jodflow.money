@@ -192,11 +192,11 @@ export default function DebtList({ embedded = false, bare = false }) {
     try { await fn() } catch (err) { setError(err.message) } finally { setBusy(false) }
   }
 
-  const handlePay = ({ method, accountId, amount, date }) => run(async () => {
+  const handlePay = ({ method, accountId, amount, date, slipFiles }) => run(async () => {
     const { debt, entry } = payTarget
     const isRecv = debt.direction === 'receivable'
     await payEntry(entry.id, {
-      method, accountId, amount, date,
+      method, accountId, amount, date, slipFiles,
       log: buildLogEntry({
         activityType: isRecv ? 'DEBT_RECEIVE' : 'DEBT_PAY',
         description: `${isRecv ? 'รับคืน' : 'จ่าย'}งวดที่ ${entry.seq}/${debt.months} "${debt.name}" ${fmt(amount)} บาท ${isRecv ? 'เข้า' : 'จาก'}${method === 'cash' ? 'เงินสด' : 'เงินโอน'}`,

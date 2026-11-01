@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { assertCanPay } from '../lib/balanceGuard'
 import * as api from '../lib/api/debts'
 import { toDateString } from '../lib/cardCycle'
+import { attachSlipFiles } from '../lib/paymentSlipFiles'
 
 /**
  * หนี้สินและลูกหนี้ — แคชของเซิร์ฟเวอร์ ยอดขยับผ่าน RPC เท่านั้น
@@ -35,6 +36,10 @@ const useDebtStore = create((set, get) => ({
     if (debt?.direction !== 'receivable') await assertCanPay(params)
     const r = await api.payDebtEntry(id, params)
     await get().refresh()
+    await attachSlipFiles({
+      kind: 'debt', refId: id, paidAt: get().entries.find((e) => e.id === id)?.paidAt ?? params.date,
+      title: debt?.name ?? 'งวดหนี้สิน', amount: params.amount, files: params.slipFiles,
+    })
     return r
   },
   undoEntry: async (id, log) => { const r = await api.undoDebtEntry(id, log); await get().refresh(); return r },

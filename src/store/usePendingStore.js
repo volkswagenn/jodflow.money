@@ -4,6 +4,7 @@ import * as pendingApi from '../lib/api/pending'
 import useTransactionStore from './useTransactionStore'
 import useWalletStore from './useWalletStore'
 import useRecurringStore from './useRecurringStore'
+import { attachSlipFiles } from '../lib/paymentSlipFiles'
 
 /**
  * หลัง RPC จ่าย/รับเงิน ฐานข้อมูลสร้าง transaction + ขยับยอด + (อาจ) ปิดรอบรายการประจำ
@@ -141,9 +142,10 @@ const usePendingStore = create((set, get) => ({
   },
 
   /** จ่าย + สร้างรายการ + ตัดเงิน + อัปเดตรายการประจำ ในคำสั่งเดียว */
-  payPendingAtomic: async (id, { method, accountId = null, date = null, log = null }) => {
+  payPendingAtomic: async (id, { method, accountId = null, date = null, log = null, slipFiles = [] }) => {
     // ยอดของรายการค้างชำระอยู่ในตัวรายการ ไม่ได้ส่งมากับคำสั่งจ่าย
-    const amount = get().pendingPayments.find((p) => p.id === id)?.amount ?? 0
+    const item = get().pendingPayments.find((p) => p.id === id)
+    const amount = item?.amount ?? 0
     await assertCanPay({ method, accountId, amount })   // เงินไม่พอ / ไม่จ่ายต่อ → หยุดก่อนแตะเงิน
     const tx = await pendingApi.payPendingPayment(id, { method, accountId, date, log })
     set((s) => ({
@@ -157,6 +159,10 @@ const usePendingStore = create((set, get) => ({
       ),
     }))
     await propagateAtomicResult(tx)
+    await attachSlipFiles({
+      kind: 'pending', refId: id, paidAt: date ?? new Date().toISOString(),
+      title: item?.itemName || item?.description || 'รายการค้างชำระ', amount, files: slipFiles,
+    })
     return tx
   },
 

@@ -4,12 +4,14 @@ import { format } from 'date-fns'
 import TransferAccountPicker from './TransferAccountPicker'
 import DateTimeField, { toTimestamp } from './DateTimeField'
 import useWalletStore from '../../store/useWalletStore'
+import SlipPicker from './SlipPicker'
 
 export default function PayPendingDatePopup({ open, item, method, danger = false, onConfirm, onCancel }) {
   const [paidDate, setPaidDate] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [paidTime, setPaidTime] = useState('')   // ว่าง = เที่ยงตรงของวันที่เลือก
   // ใช้บัญชีที่ผูกไว้ตอนเปิดบิล/ตั้งรายการประจำเป็นค่าเริ่มต้น
   const [accountId, setAccountId] = useState(item?.defaultTransferAccountId ?? '')
+  const [slipFiles, setSlipFiles] = useState([])
   const resolveAccount = useWalletStore((s) => s.resolveTransferAccountId)
 
   if (!open || !item) return null
@@ -26,7 +28,7 @@ export default function PayPendingDatePopup({ open, item, method, danger = false
       headTone={danger ? 'danger' : 'default'}
       width={420}
       onClose={onCancel}
-      onConfirm={() => onConfirm(paidDate, resolvedAccountId, toTimestamp(paidDate, paidTime))}
+      onConfirm={() => onConfirm(paidDate, resolvedAccountId, toTimestamp(paidDate, paidTime), slipFiles)}
       danger={danger}
       disabled={!paidDate || (needsAccount && !resolvedAccountId)}
       confirmLabel="ยืนยันชำระ"
@@ -58,6 +60,8 @@ export default function PayPendingDatePopup({ open, item, method, danger = false
         time={paidTime}
         onChange={({ date, time }) => { setPaidDate(date); setPaidTime(time) }}
       />
+
+      <SlipPicker files={slipFiles} onChange={setSlipFiles} />
     </Popup>
   )
 }

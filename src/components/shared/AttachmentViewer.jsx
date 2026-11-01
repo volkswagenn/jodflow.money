@@ -6,7 +6,7 @@ function fileNameFromPath(path = '') {
   return String(path).split(/[\\/]/).filter(Boolean).pop() || 'ไฟล์แนบ'
 }
 
-function fileKind(path = '') {
+export function fileKind(path = '') {
   const ext = fileNameFromPath(path).split('.').pop()?.toLowerCase() ?? ''
   if (['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'heic'].includes(ext)) return 'image'
   if (ext === 'pdf') return 'pdf'
@@ -18,7 +18,7 @@ function fileKind(path = '') {
  * พาธรุ่นเก่า (ไม่ได้ขึ้นต้นด้วย shop_id) คือไฟล์ที่เคยดาวน์โหลดเก็บไว้ในเครื่องผู้ใช้
  * ระบบไม่มีไฟล์นั้น จึงบอกตรงๆ แทนที่จะพยายามโหลดแล้วขึ้น error
  */
-function AttachmentPreview({ path }) {
+export function AttachmentPreview({ path }) {
   const [url, setUrl] = useState(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)

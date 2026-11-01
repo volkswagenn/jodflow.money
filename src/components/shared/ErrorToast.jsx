@@ -16,26 +16,37 @@ import Icon from './Icon'
  */
 export default function ErrorToast() {
   const [message, setMessage] = useState('')
+  // หัวข้อเฉพาะกรณีงานหลักสำเร็จแล้ว (ดู paymentSlipFiles) · ว่าง = ทำรายการไม่สำเร็จจริง
+  const [title, setTitle] = useState('')
 
   useEffect(() => {
     function onRejection(event) {
       const reason = event.reason
       const text = reason?.message ?? (typeof reason === 'string' ? reason : '')
       if (!text) return
+      setTitle('')
       setMessage(text)
       // ยังปล่อยให้ขึ้น console ตามปกติ เพื่อให้ตอนไล่บั๊กยังเห็น stack เต็มๆ
       console.error('งานเบื้องหลังล้มเหลว:', reason)
     }
+    function onWarning(event) {
+      setTitle(event.detail?.title ?? '')
+      setMessage(event.detail?.message ?? '')
+    }
     window.addEventListener('unhandledrejection', onRejection)
-    return () => window.removeEventListener('unhandledrejection', onRejection)
+    window.addEventListener('app-warning', onWarning)
+    return () => {
+      window.removeEventListener('unhandledrejection', onRejection)
+      window.removeEventListener('app-warning', onWarning)
+    }
   }, [])
 
   // ปิดเองใน 8 วินาที — นานพอให้อ่านทัน แต่ไม่ค้างบังหน้าจอ
   useEffect(() => {
     if (!message) return
-    const timer = setTimeout(() => setMessage(''), 8000)
+    const timer = setTimeout(() => setMessage(''), title ? 15000 : 8000)
     return () => clearTimeout(timer)
-  }, [message])
+  }, [message, title])
 
   if (!message) return null
 
@@ -44,7 +55,7 @@ export default function ErrorToast() {
       <div className="flex items-start gap-2.5 rounded-panel bg-expense-soft border border-expense/30 px-4 py-3 shadow-card">
         <Icon name="error" size={18} className="text-expense flex-none mt-px" />
         <div className="min-w-0 flex-1">
-          <p className="text-[12.5px] font-semibold text-expense">ทำรายการไม่สำเร็จ</p>
+          <p className="text-[12.5px] font-semibold text-expense">{title || 'ทำรายการไม่สำเร็จ'}</p>
           <p className="text-[12.5px] text-expense/90 mt-0.5 break-words">{message}</p>
         </div>
         <button

@@ -7,6 +7,7 @@ import CreditCardPicker from '../../components/shared/CreditCardPicker'
 import DateTimeField, { toTimestamp } from '../../components/shared/DateTimeField'
 import useWalletStore from '../../store/useWalletStore'
 import useCreditCardStore from '../../store/useCreditCardStore'
+import SlipPicker from '../../components/shared/SlipPicker'
 
 const METHOD_OPTIONS = [
   { value: 'cash', label: '💵 เงินสด' },
@@ -24,6 +25,7 @@ export default function PayEntryPopup({ entry, item, onConfirm, onSaveAmount, on
   const [cardId, setCardId] = useState(item.defaultCardId ?? '')
   const [paidDate, setPaidDate] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [paidTime, setPaidTime] = useState('')   // ว่าง = เที่ยงตรงของวันที่เลือก
+  const [slipFiles, setSlipFiles] = useState([])
   const [error, setError] = useState('')
 
   const resolveAccount = useWalletStore((s) => s.resolveTransferAccountId)
@@ -33,6 +35,8 @@ export default function PayEntryPopup({ entry, item, onConfirm, onSaveAmount, on
   const canSaveAmount = !isNaN(parsedAmount) && parsedAmount > 0
   const needsAccount = method === 'transfer'
   const needsCard = method === 'card'
+  // รูดบัตรกับค้างชำระยังไม่มีเงินออก จึงยังไม่มีสลิปให้แนบ
+  const canAttachSlip = method === 'cash' || method === 'transfer'
   const canSubmit = method && paidDate && canSaveAmount
     && (!needsAccount || !!resolveAccount(accountId))
     && (!needsCard || !!resolveCard(cardId))
@@ -52,7 +56,8 @@ export default function PayEntryPopup({ entry, item, onConfirm, onSaveAmount, on
       parsedAmount, method, paidDate,
       needsAccount ? resolveAccount(accountId) : null,
       needsCard ? resolveCard(cardId) : null,
-      toTimestamp(paidDate, paidTime)
+      toTimestamp(paidDate, paidTime),
+      canAttachSlip ? slipFiles : []
     )
   }
 
@@ -155,6 +160,8 @@ export default function PayEntryPopup({ entry, item, onConfirm, onSaveAmount, on
             time={paidTime}
             onChange={({ date, time }) => { setPaidDate(date); setPaidTime(time); setError('') }}
           />
+
+          {canAttachSlip && <SlipPicker files={slipFiles} onChange={setSlipFiles} />}
 
           {error && <p className="text-sm text-red-500">{error}</p>}
     </Popup>

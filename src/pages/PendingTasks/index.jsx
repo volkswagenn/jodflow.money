@@ -131,9 +131,9 @@ export default function PendingTasksPage() {
     try { await fn() } catch (err) { setError(err.message) } finally { setBusy(false) }
   }
 
-  const doPayCard = ({ method, accountId, amount, date }) => run(async () => {
+  const doPayCard = ({ method, accountId, amount, date, slipFiles }) => run(async () => {
     const s = payCard
-    await payStatement(s.id, { method, accountId, amount, date, log: buildLogEntry({
+    await payStatement(s.id, { method, accountId, amount, date, slipFiles, log: buildLogEntry({
       activityType: 'CARD_PAYMENT',
       description: `จ่ายบิลบัตร "${getCardLabel(s.cardId)}" รอบ ${s.cycle} ${fmt(amount)} บาท`,
       walletEffect: { target: method, delta: -amount, transferAccountId: accountId },
@@ -142,10 +142,10 @@ export default function PendingTasksPage() {
     await refreshWallet(); setPayCard(null)
   })
 
-  const doPayDebt = ({ method, accountId, amount, date }) => run(async () => {
+  const doPayDebt = ({ method, accountId, amount, date, slipFiles }) => run(async () => {
     const { debt, entry } = payDebt
     const recv = debt.direction === 'receivable'
-    await payEntry(entry.id, { method, accountId, amount, date, log: buildLogEntry({
+    await payEntry(entry.id, { method, accountId, amount, date, slipFiles, log: buildLogEntry({
       activityType: recv ? 'DEBT_RECEIVE' : 'DEBT_PAY',
       description: `${recv ? 'รับคืน' : 'จ่าย'}งวดที่ ${entry.seq}/${debt.months} "${debt.name}" ${fmt(amount)} บาท`,
       walletEffect: { target: method, delta: recv ? amount : -amount, transferAccountId: accountId },
@@ -154,9 +154,9 @@ export default function PendingTasksPage() {
     await refreshWallet(); setPayDebt(null)
   })
 
-  const doPayPending = (date, accountId) => run(async () => {
+  const doPayPending = (date, accountId, _paidAt, slipFiles) => run(async () => {
     const { item, method } = payPending
-    await payPendingAtomic(item.id, { method, accountId, date, log: buildLogEntry({
+    await payPendingAtomic(item.id, { method, accountId, date, slipFiles, log: buildLogEntry({
       activityType: 'PAY_PENDING',
       description: `ชำระค้างชำระ "${item.description ?? item.itemName}" ${fmt(item.amount)} บาท (${method === 'cash' ? 'เงินสด' : 'เงินโอน'}) วันที่ ${date}`,
       walletEffect: { target: method === 'cash' ? 'cash' : `transfer:${accountId}`, delta: -item.amount, transferAccountId: accountId },

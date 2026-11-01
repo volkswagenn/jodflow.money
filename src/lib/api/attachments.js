@@ -48,10 +48,10 @@ export async function uploadAttachment(file, { folderBase, filename, createdAt }
 }
 
 /** ลิงก์ชั่วคราวสำหรับเปิดดู (bucket เป็น private จึงต้องใช้ signed URL) */
-export async function getAttachmentUrl(path, expiresInSeconds = 3600) {
+export async function getAttachmentUrl(path, expiresInSeconds = 3600, options = undefined) {
   const { data, error } = await supabase.storage
     .from(ATTACHMENT_BUCKET)
-    .createSignedUrl(path, expiresInSeconds)
+    .createSignedUrl(path, expiresInSeconds, options)
   if (error) throw new Error(storageError(error))
   return data.signedUrl
 }

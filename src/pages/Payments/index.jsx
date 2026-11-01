@@ -1,16 +1,16 @@
 import { useMemo, useState } from 'react'
 import { format, subMonths } from 'date-fns'
 import usePaymentHistory, { PAYMENT_KINDS } from '../../hooks/usePaymentHistory'
-import usePaymentSlipStore from '../../store/usePaymentSlipStore'
+import useSlipActions from '../../hooks/useSlipActions'
 import { slipsInstalled } from '../../lib/api/paymentSlips'
-import useLogStore from '../../store/useLogStore'
-import { buildLogEntry } from '../../lib/logBuilder'
 import Icon from '../../components/shared/Icon'
 import Popup from '../../components/shared/Popup'
 import FileUploadPopup from '../../components/shared/FileUploadPopup'
-import AttachmentViewerPopup, { getAttachments } from '../../components/shared/AttachmentViewer'
+import { getAttachments } from '../../components/shared/AttachmentViewer'
+import SlipViewerPopup from '../../components/shared/SlipViewerPopup'
+import SlipMonth from './SlipMonth'
+import { paymentViewerItem, whenText } from '../../lib/paymentSlipView'
 import DateRangeFilter from '../../components/shared/DateRangeFilter'
-import { formatIsoThai } from '../../lib/cardCycle'
 import ConfirmPopup from '../../components/shared/ConfirmPopup'
 import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
 import DatePicker from '../../components/shared/DatePicker'
@@ -24,24 +24,6 @@ const THAI_MONTHS = [
   'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
   'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม',
 ]
-
-/**
- * '2026-09-06T13:45:00' → '6 ก.ย. 2569 13:45'
- *
- * ค่าที่เก็บมามีสองแบบ: บางตารางเก็บเป็นวันที่ล้วน ('2026-09-05') บางตารางเก็บ
- * เวลาเต็ม การเอาวันที่ล้วนไปแปลงเป็นเวลาจะได้เวลาปลอมตามโซนเวลา (07:00)
- * จึงดูจากรูปแบบของค่าที่เก็บ ไม่ใช่จากผลการแปลง
- * และเวลาเที่ยงตรงคือค่าตั้งต้นตอนผู้ใช้เลือกแค่วันที่ ไม่ใช่เวลาจ่ายจริง จึงไม่โชว์
- */
-function whenText(value) {
-  if (!value) return '—'
-  const hasTime = typeof value === 'string' && value.includes('T')
-  if (!hasTime) return formatIsoThai(value)
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return formatIsoThai(value)
-  const time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-  return time === '12:00' ? formatIsoThai(value) : `${formatIsoThai(value)} ${time}`
-}
 
 function monthLabel(day) {
   if (!day) return 'ไม่ระบุวันที่'
@@ -58,9 +40,7 @@ function monthLabel(day) {
  */
 export default function PaymentsPage() {
   const rows = usePaymentHistory()
-  const saveSlip = usePaymentSlipStore((s) => s.save)
-  const removeSlip = usePaymentSlipStore((s) => s.remove)
-  const { addLog } = useLogStore()
+  const { attachPaths, dropSlip: removeSlip } = useSlipActions()
 
   const [kind, setKind] = useState('all')
   const [q, setQ] = useState('')
@@ -71,7 +51,11 @@ export default function PaymentsPage() {
   const [endDate, setEndDate] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [detail, setDetail] = useState(null)
   const [uploadFor, setUploadFor] = useState(null)
-  const [viewSlip, setViewSlip] = useState(null)
+  // key ของการจ่ายที่เปิดดูสลิปอยู่ — เก็บ key ไม่เก็บตัวไฟล์ เปลี่ยนไฟล์แล้วตัวดูจะได้เห็นไฟล์ใหม่ทันที
+  const [viewKey, setViewKey] = useState(null)
+  // รายการ = แถวการจ่าย · สลิป = ตารางรูป
+  const [view, setView] = useState('list')
+  const [onlyMissing, setOnlyMissing] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   // ผลของการย้อน/แก้ไข — ป๊อปอัปปิดไปแล้ว ต้องมีที่บอกว่าเกิดอะไรขึ้นกับเงิน
@@ -95,32 +79,33 @@ export default function PaymentsPage() {
   }, [rows, kind, q, startDate, endDate])
 
   const total = shown.reduce((n, r) => n + (r.incoming ? 0 : r.amount), 0)
-  const withSlip = shown.filter((r) => getAttachments(r.slip).length > 0).length
+  const hasSlip = (r) => getAttachments(r.slip).length > 0
+  const withSlip = shown.filter(hasSlip).length
+  const missing = shown.length - withSlip
+
+  const visible = useMemo(() => {
+    if (view === 'slips') return shown.filter(hasSlip)
+    return onlyMissing ? shown.filter((r) => !hasSlip(r)) : shown
+  }, [shown, view, onlyMissing])
+
+  // ตัวดูสลิปกดไปการจ่ายถัดไปได้ จึงเอาทุกการจ่ายที่มีสลิปในช่วงที่กรองอยู่ ไม่ใช่แค่แถวที่กด
+  const viewerItems = useMemo(() => shown.filter(hasSlip).map(paymentViewerItem), [shown])
 
   // จัดกลุ่มตามเดือน — ประวัติยาวเป็นปี ถ้าไล่เป็นรายการยาวรวดเดียวจะหาไม่เจอ
   const groups = useMemo(() => {
     const map = new Map()
-    for (const r of shown) {
+    for (const r of visible) {
       const k = r.day ? r.day.slice(0, 7) : 'unknown'
       if (!map.has(k)) map.set(k, [])
       map.get(k).push(r)
     }
     return [...map.entries()]
-  }, [shown])
+  }, [visible])
 
   const attachSlip = async (row, paths) => {
     setBusy(true); setError('')
     try {
-      const attachments = paths.map((path, i) => ({
-        path, type: 'slip', label: paths.length > 1 ? `สลิป ${i + 1}` : 'สลิปโอนเงิน',
-        uploadedAt: new Date().toISOString(),
-      }))
-      await saveSlip({ kind: row.kind, refId: row.refId, paidAt: row.paidAt, attachments })
-      await addLog(buildLogEntry({
-        activityType: 'ATTACH_PAYMENT_SLIP',
-        description: `แนบสลิปการจ่าย "${row.title}" ${fmt(row.amount)} บาท`,
-        newValue: { kind: row.kind, refId: row.refId, files: paths.length },
-      }))
+      const attachments = await attachPaths(row, paths)
       setDetail((d) => (d && d.key === row.key ? { ...d, slip: { ...d.slip, attachments } } : d))
     } catch (err) {
       setError(err.message)
@@ -134,7 +119,7 @@ export default function PaymentsPage() {
     if (!row.slip?.id) return
     setBusy(true); setError('')
     try {
-      await removeSlip(row.slip.id)
+      await removeSlip(row)
       setDetail((d) => (d && d.key === row.key ? { ...d, slip: null } : d))
     } catch (err) {
       setError(err.message)
@@ -214,10 +199,15 @@ export default function PaymentsPage() {
           <div className="text-[11.5px] text-muted">มีสลิปแนบแล้ว</div>
           <div className="tabular-nums text-[22px] font-semibold text-income mt-0.5">{withSlip}</div>
         </div>
-        <div className="card px-4 py-3.5">
+        {/* กดเพื่อกรอง — ตัวเลขนี้คือสิ่งที่ต้องตามต่อ ต้องไปถึงรายการได้จากตรงนี้เลย */}
+        <button
+          onClick={() => { setView('list'); setOnlyMissing((v) => !v) }}
+          aria-pressed={onlyMissing}
+          className={`card px-4 py-3.5 text-left transition hover:border-ink ${onlyMissing ? 'border-ink shadow-[0_0_0_1px_#16181D]' : ''}`}
+        >
           <div className="text-[11.5px] text-muted">ยังไม่มีสลิป</div>
-          <div className="tabular-nums text-[22px] font-semibold text-[#3F444C] mt-0.5">{shown.length - withSlip}</div>
-        </div>
+          <div className="tabular-nums text-[22px] font-semibold text-[#3F444C] mt-0.5">{missing}</div>
+        </button>
       </div>
 
       <div className="card px-4 py-3 flex flex-col gap-2.5">
@@ -228,6 +218,24 @@ export default function PaymentsPage() {
           compact
         />
         <div className="flex items-center gap-2 flex-wrap">
+          <div role="group" aria-label="มุมมอง" className="flex p-[3px] bg-paper rounded-[11px] flex-none">
+            {[
+              { v: 'list', icon: 'view_list', t: 'รายการ' },
+              { v: 'slips', icon: 'grid_view', t: 'สลิป' },
+            ].map((m) => (
+              <button
+                key={m.v}
+                onClick={() => { setView(m.v); setOnlyMissing(false) }}
+                aria-pressed={view === m.v}
+                className={`h-[34px] px-3 rounded-lg text-[12.5px] font-semibold flex items-center gap-1.5 transition ${
+                  view === m.v ? 'bg-ink text-white' : 'text-[#3C4048] hover:text-ink'
+                }`}
+              >
+                <Icon name={m.icon} size={17} />
+                {m.t}
+              </button>
+            ))}
+          </div>
           <KindChip value="all" label="ทั้งหมด" count={rows.length} />
           {Object.entries(PAYMENT_KINDS).map(([k, meta]) => (
             <KindChip key={k} value={k} label={meta.label} count={rows.filter((r) => r.kind === k).length} />
@@ -259,13 +267,30 @@ export default function PaymentsPage() {
         </p>
       )}
 
-      {shown.length === 0 ? (
+      {/* มุมมองสลิปแสดงเฉพาะการจ่ายที่มีรูป ต้องบอกว่ายังมีที่ขาด ไม่งั้นจะดูเหมือนครบแล้ว */}
+      {view === 'slips' && missing > 0 && (
+        <button
+          onClick={() => { setView('list'); setOnlyMissing(true) }}
+          className="min-h-11 px-3.5 py-2 rounded-ctl bg-pending-soft border border-pending-line text-[12.5px] font-medium text-[#5C4306] flex items-center gap-2 text-left hover:border-[#A8760B]"
+        >
+          <span className="flex-1">ในช่วงนี้ยังมี {missing} การจ่ายที่ไม่มีสลิป จึงไม่แสดงในมุมมองนี้ · ดูรายการที่ยังไม่แนบ</span>
+          <Icon name="chevron_right" size={18} className="flex-none" />
+        </button>
+      )}
+
+      {visible.length === 0 ? (
         <div className="card px-4 py-10 text-center text-[12.5px] text-muted">
           {rows.length === 0
             ? 'ยังไม่มีประวัติการจ่าย — เมื่อจ่ายบิลบัตร ค่างวด หรือรายการค้างชำระ จะมาอยู่ที่นี่'
-            : 'ไม่พบรายการที่ตรงกับที่กรอง'}
+            : view === 'slips'
+              ? 'ในช่วงที่เลือกยังไม่มีสลิปที่แนบไว้'
+              : onlyMissing
+                ? 'ทุกการจ่ายในช่วงที่เลือกมีสลิปครบแล้ว'
+                : 'ไม่พบรายการที่ตรงกับที่กรอง'}
         </div>
-      ) : groups.map(([month, list]) => (
+      ) : view === 'slips' ? groups.map(([month, list]) => (
+        <SlipMonth key={month} label={monthLabel(list[0].day)} rows={list} onOpen={(r) => setViewKey(r.key)} />
+      )) : groups.map(([month, list]) => (
         <div key={month} className="card overflow-hidden">
           <div className="flex items-center gap-2.5 px-4 pt-3 pb-2 border-b border-[#F2F0EA]">
             <span className="text-sm font-semibold">{monthLabel(list[0].day)}</span>
@@ -311,7 +336,7 @@ export default function PaymentsPage() {
                   </span>
                   {files.length > 0 ? (
                     <button
-                      onClick={() => setViewSlip(files)}
+                      onClick={() => setViewKey(r.key)}
                       className="flex-none h-[30px] px-2.5 rounded-[9px] border border-hairline bg-white text-[11.5px] font-semibold flex items-center gap-1 hover:bg-paper"
                     >
                       <Icon name="receipt_long" size={15} />
@@ -528,7 +553,7 @@ export default function PaymentsPage() {
             {getAttachments(detail.slip).length > 0 ? (
               <div className="flex items-center gap-2 flex-wrap">
                 <button
-                  onClick={() => setViewSlip(getAttachments(detail.slip))}
+                  onClick={() => setViewKey(detail.key)}
                   className="h-[34px] px-3 rounded-[9px] bg-ink text-white text-[12px] font-semibold flex items-center gap-1.5 hover:bg-black"
                 >
                   <Icon name="receipt_long" size={16} />
@@ -579,6 +604,18 @@ export default function PaymentsPage() {
         onCancel={() => setConfirmUndo(null)}
       />
 
+      {viewKey && (
+        <SlipViewerPopup
+          items={viewerItems}
+          itemKey={viewKey}
+          onChangeItem={setViewKey}
+          onClose={() => setViewKey(null)}
+          onReplace={(row) => setUploadFor(row)}
+          onRemove={(row) => dropSlip(row)}
+          busy={busy}
+        />
+      )}
+
       {uploadFor && (
         <FileUploadPopup
           title="แนบสลิปการจ่าย"
@@ -595,7 +632,6 @@ export default function PaymentsPage() {
         />
       )}
 
-      {viewSlip && <AttachmentViewerPopup attachments={viewSlip} onClose={() => setViewSlip(null)} />}
     </div>
   )
 }
