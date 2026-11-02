@@ -1,6 +1,7 @@
 import { getAttachments } from '../components/shared/AttachmentViewer'
 import { PAYMENT_KINDS } from '../hooks/usePaymentHistory'
 import { formatIsoThai } from './cardCycle'
+import { slipTarget } from './attachmentTargets'
 
 /**
  * '2026-09-06T13:45:00' → '6 ก.ย. 2569 13:45'
@@ -38,7 +39,7 @@ export function paymentViewerItem(row) {
       ...(uploadedAt ? [['แนบเมื่อ', whenText(uploadedAt)]] : []),
     ],
     files,
-    row,
+    target: slipTarget(row),
   }
 }
 
@@ -46,5 +47,6 @@ export function paymentViewerItem(row) {
 export function fileShortLabel(file) {
   if (file?.type === 'slip') return 'สลิป'
   if (file?.type === 'taxinvoice') return 'ใบกำกับ'
+  if (file?.type === 'document') return 'เอกสาร'
   return 'ใบเสร็จ'
 }

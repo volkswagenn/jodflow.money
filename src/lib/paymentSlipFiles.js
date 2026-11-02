@@ -6,6 +6,9 @@ import useLogStore from '../store/useLogStore'
 /** ขนาดสูงสุดต่อไฟล์ — เท่ากับช่องอัปโหลดอื่นในแอป (FileUploadPopup) */
 export const MAX_SLIP_BYTES = 15 * 1024 * 1024
 
+/** แนบได้เฉพาะรูปกับ PDF — ชนิดที่ตัวดูไฟล์เปิดในแอปได้ */
+export const isAttachableFile = (f) => f.type?.startsWith('image/') || f.type === 'application/pdf' || /\.pdf$/i.test(f.name ?? '')
+
 const EXT_OF_TYPE = {
   'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp',
   'image/gif': 'gif', 'image/heic': 'heic', 'application/pdf': 'pdf',
@@ -15,7 +18,7 @@ const EXT_OF_TYPE = {
  * ตั้งชื่อไฟล์ — หน้าดูสลิปดูชนิดไฟล์จากนามสกุล จึงต้องมีนามสกุลจริงเสมอ
  * (รูปที่วางจากคลิปบอร์ดบางเบราว์เซอร์ไม่มีชื่อไฟล์มาให้)
  */
-function slipFilename(file, paidAt, index, total) {
+export function attachmentFilename(file, paidAt, index, total, prefix = 'slip') {
   const named = file.name?.includes('.') ? file.name.split('.').pop().toLowerCase() : null
   const ext = named || EXT_OF_TYPE[file.type] || 'file'
   const base = new Date(paidAt ?? Date.now())
@@ -24,7 +27,7 @@ function slipFilename(file, paidAt, index, total) {
   const day = `${two(base.getDate())}${two(base.getMonth() + 1)}${String(base.getFullYear()).slice(-2)}`
   const time = `${two(now.getHours())}${two(now.getMinutes())}${two(now.getSeconds())}`
   const suffix = total > 1 ? `_${two(index + 1)}` : ''
-  return `slip_${day}_${time}${suffix}.${ext}`
+  return `${prefix}_${day}_${time}${suffix}.${ext}`
 }
 
 /**
@@ -57,7 +60,7 @@ export async function attachSlipFiles({ kind, refId, paidAt, title, amount, file
     try {
       const path = await uploadAttachment(files[i], {
         folderBase: 'slips',
-        filename: slipFilename(files[i], paidAt, i, files.length),
+        filename: attachmentFilename(files[i], paidAt, i, files.length),
         createdAt: paidAt,
       })
       attachments.push({

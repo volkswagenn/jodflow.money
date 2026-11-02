@@ -1,9 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import Icon from './Icon'
-import { MAX_SLIP_BYTES } from '../../lib/paymentSlipFiles'
+import { isAttachableFile, MAX_SLIP_BYTES } from '../../lib/paymentSlipFiles'
 import { slipsInstalled } from '../../lib/api/paymentSlips'
-
-const isAllowed = (f) => f.type?.startsWith('image/') || f.type === 'application/pdf' || /\.pdf$/i.test(f.name ?? '')
 
 /**
  * ช่องแนบสลิปในหน้าต่างจ่ายเงิน — เลือกไฟล์ไว้ก่อน ยังไม่อัปโหลด
@@ -32,7 +30,7 @@ export default function SlipPicker({ files, onChange, disabled = false }) {
   const add = (incoming) => {
     const list = Array.from(incoming ?? [])
     if (list.length === 0) return
-    const ok = list.filter((f) => isAllowed(f) && f.size <= MAX_SLIP_BYTES)
+    const ok = list.filter((f) => isAttachableFile(f) && f.size <= MAX_SLIP_BYTES)
     setError(ok.length === list.length ? '' : `แนบได้เฉพาะรูปหรือ PDF ไม่เกิน ${MAX_SLIP_BYTES / 1024 / 1024} MB ต่อไฟล์`)
     if (ok.length > 0) onChange([...files, ...ok])
   }

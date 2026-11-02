@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react'
 import { format, subMonths } from 'date-fns'
 import usePaymentHistory, { PAYMENT_KINDS } from '../../hooks/usePaymentHistory'
-import useSlipActions from '../../hooks/useSlipActions'
 import { slipsInstalled } from '../../lib/api/paymentSlips'
 import Icon from '../../components/shared/Icon'
 import Popup from '../../components/shared/Popup'
-import FileUploadPopup from '../../components/shared/FileUploadPopup'
+import AttachmentManagerPopup from '../../components/shared/AttachmentManagerPopup'
+import { slipTarget } from '../../lib/attachmentTargets'
 import { getAttachments } from '../../components/shared/AttachmentViewer'
 import SlipViewerPopup from '../../components/shared/SlipViewerPopup'
 import SlipMonth from './SlipMonth'
@@ -40,7 +40,6 @@ function monthLabel(day) {
  */
 export default function PaymentsPage() {
   const rows = usePaymentHistory()
-  const { attachPaths, dropSlip: removeSlip } = useSlipActions()
 
   const [kind, setKind] = useState('all')
   const [q, setQ] = useState('')
@@ -49,8 +48,10 @@ export default function PaymentsPage() {
   const [filter, setFilter] = useState('year')
   const [startDate, setStartDate] = useState(format(subMonths(new Date(), 12), 'yyyy-MM-dd'))
   const [endDate, setEndDate] = useState(format(new Date(), 'yyyy-MM-dd'))
-  const [detail, setDetail] = useState(null)
-  const [uploadFor, setUploadFor] = useState(null)
+  const [detailRow, setDetail] = useState(null)
+  // อ่านแถวล่าสุดเสมอ — แก้ไฟล์แนบระหว่างเปิดป๊อปอัปอยู่ จะได้เห็นผลทันที
+  const detail = detailRow ? (rows.find((r) => r.key === detailRow.key) ?? detailRow) : null
+  const [manageTarget, setManageTarget] = useState(null)
   // key ของการจ่ายที่เปิดดูสลิปอยู่ — เก็บ key ไม่เก็บตัวไฟล์ เปลี่ยนไฟล์แล้วตัวดูจะได้เห็นไฟล์ใหม่ทันที
   const [viewKey, setViewKey] = useState(null)
   // รายการ = แถวการจ่าย · สลิป = ตารางรูป
@@ -101,32 +102,6 @@ export default function PaymentsPage() {
     }
     return [...map.entries()]
   }, [visible])
-
-  const attachSlip = async (row, paths) => {
-    setBusy(true); setError('')
-    try {
-      const attachments = await attachPaths(row, paths)
-      setDetail((d) => (d && d.key === row.key ? { ...d, slip: { ...d.slip, attachments } } : d))
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setBusy(false)
-      setUploadFor(null)
-    }
-  }
-
-  const dropSlip = async (row) => {
-    if (!row.slip?.id) return
-    setBusy(true); setError('')
-    try {
-      await removeSlip(row)
-      setDetail((d) => (d && d.key === row.key ? { ...d, slip: null } : d))
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setBusy(false)
-    }
-  }
 
   /**
    * ย้อน / แก้ไขวิธีจ่าย — ตัวทำงานจริงอยู่ใน lib/paymentActions (คืนเงิน คืนสถานะ
@@ -344,7 +319,7 @@ export default function PaymentsPage() {
                     </button>
                   ) : (
                     <button
-                      onClick={() => setUploadFor(r)}
+                      onClick={() => setManageTarget(slipTarget(r))}
                       disabled={!canAttach}
                       title={canAttach ? 'แนบสลิปโอนเงินของการจ่ายครั้งนี้' : 'ต้องรัน supabase/slips.sql ก่อน'}
                       className="flex-none h-[30px] px-2.5 rounded-[9px] border border-dashed border-[#D8D4C9] text-[11.5px] text-muted hover:border-ink hover:text-ink disabled:opacity-40 disabled:hover:border-[#D8D4C9] disabled:hover:text-muted"
@@ -560,22 +535,15 @@ export default function PaymentsPage() {
                   เปิดดูสลิป
                 </button>
                 <button
-                  onClick={() => setUploadFor(detail)}
+                  onClick={() => setManageTarget(slipTarget(detail))}
                   className="h-[34px] px-3 rounded-[9px] border border-hairline bg-white text-[12px] hover:bg-paper"
                 >
-                  เปลี่ยนไฟล์
-                </button>
-                <button
-                  onClick={() => dropSlip(detail)}
-                  disabled={busy}
-                  className="h-[34px] px-3 rounded-[9px] border border-hairline bg-white text-[12px] text-expense hover:bg-expense-soft disabled:opacity-50"
-                >
-                  เอาสลิปออก
+                  แนบเพิ่ม · เปลี่ยน · ลบไฟล์
                 </button>
               </div>
             ) : (
               <button
-                onClick={() => setUploadFor(detail)}
+                onClick={() => setManageTarget(slipTarget(detail))}
                 disabled={!canAttach}
                 title={canAttach ? 'แนบสลิปโอนเงินของการจ่ายครั้งนี้' : 'ต้องรัน supabase/slips.sql ก่อน'}
                 className="h-[34px] px-3 rounded-[9px] border border-dashed border-[#D8D4C9] text-[12px] text-muted hover:border-ink hover:text-ink disabled:opacity-40 disabled:hover:border-[#D8D4C9] disabled:hover:text-muted"
@@ -610,28 +578,11 @@ export default function PaymentsPage() {
           itemKey={viewKey}
           onChangeItem={setViewKey}
           onClose={() => setViewKey(null)}
-          onReplace={(row) => setUploadFor(row)}
-          onRemove={(row) => dropSlip(row)}
-          busy={busy}
+          onManage={(item) => setManageTarget(item.target)}
         />
       )}
 
-      {uploadFor && (
-        <FileUploadPopup
-          title="แนบสลิปการจ่าย"
-          description={`${uploadFor.title} · ${fmt(uploadFor.amount)} บาท`}
-          createdAt={uploadFor.paidAt}
-          filenamePrefix="slip"
-          folderBase="slips"
-          onConfirm={(saved) => {
-            const paths = saved ? (Array.isArray(saved) ? saved : [saved]) : []
-            if (paths.length === 0) return setUploadFor(null)
-            attachSlip(uploadFor, paths)
-          }}
-          onCancel={() => setUploadFor(null)}
-        />
-      )}
-
+      {manageTarget && <AttachmentManagerPopup target={manageTarget} onClose={() => setManageTarget(null)} />}
     </div>
   )
 }

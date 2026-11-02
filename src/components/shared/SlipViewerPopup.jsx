@@ -1,7 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Popup from './Popup'
 import Icon from './Icon'
-import ConfirmPopup from './ConfirmPopup'
 import SlipImage from './SlipImage'
 import { AttachmentPreview } from './AttachmentViewer'
 import { getAttachmentUrl, isCloudPath } from '../../lib/api/attachments'
@@ -14,16 +13,16 @@ const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigit
  * คนเปิดสลิปเพื่อเทียบว่าตรงกับที่บันทึกไหม ถ้าต้องจำตัวเลขจากอีกหน้ามาเทียบจะพลาดง่าย
  * จึงวางสองอย่างไว้ในสายตาเดียวกัน และกดไปการจ่ายถัดไปได้เลยเวลาไล่เช็คทั้งเดือน
  *
- * @param items    [{ key, title, kindLabel, amount, incoming, facts: [[ชื่อ, ค่า]], files, row }]
- *                 row มีเฉพาะการจ่ายที่แก้สลิปจากตรงนี้ได้ (ใบเสร็จของรายการแก้ที่ฟอร์มรายการ)
+ * @param items    [{ key, title, kindLabel, amount, incoming, facts: [[ชื่อ, ค่า]], files, target }]
  * @param itemKey  key ของรายการที่กำลังดู
  */
-export default function SlipViewerPopup({ items, itemKey, onChangeItem, onClose, onReplace, onRemove, busy = false }) {
+export default function SlipViewerPopup({ items, itemKey, onChangeItem, onClose, onManage }) {
   const [fileIndex, setFileIndex] = useState(0)
-  const [confirmRemove, setConfirmRemove] = useState(false)
 
   const index = items.findIndex((x) => x.key === itemKey)
   const item = items[index]
+  // ลบไฟล์หมดแล้วรายการจะหายจากชุดนี้ ต้องปิดตัวดู ไม่งั้นค้างชี้อยู่แล้วเด้งกลับมาตอนแนบใหม่
+  useEffect(() => { if (!item) onClose() }, [item, onClose])
   if (!item) return null
 
   const file = item.files[Math.min(fileIndex, item.files.length - 1)]
@@ -130,46 +129,17 @@ export default function SlipViewerPopup({ items, itemKey, onChangeItem, onClose,
             ))}
           </div>
 
-          {item.row && (
-            <div className="mt-auto flex flex-wrap gap-2">
-              <button
-                onClick={() => onReplace(item.row)}
-                disabled={busy}
-                className="flex-[1_1_120px] h-11 rounded-[11px] border border-hairline bg-white text-[12.5px] font-semibold flex items-center justify-center gap-1.5 hover:bg-paper disabled:opacity-50"
-              >
-                <Icon name="swap_horiz" size={17} />
-                เปลี่ยนไฟล์
-              </button>
-              <button
-                onClick={() => setConfirmRemove(true)}
-                disabled={busy}
-                className="flex-[1_1_120px] h-11 rounded-[11px] border border-hairline bg-white text-[12.5px] font-semibold text-expense flex items-center justify-center gap-1.5 hover:bg-expense-soft disabled:opacity-50"
-              >
-                <Icon name="delete" size={17} />
-                เอาสลิปออก
-              </button>
-            </div>
+          {item.target && (
+            <button
+              onClick={() => onManage(item)}
+              className="mt-auto h-11 rounded-[11px] border border-hairline bg-white text-[12.5px] font-semibold flex items-center justify-center gap-1.5 hover:bg-paper"
+            >
+              <Icon name="attach_file" size={17} />
+              แนบเพิ่ม · เปลี่ยน · ลบไฟล์
+            </button>
           )}
         </div>
       </Popup>
-
-      <ConfirmPopup
-        open={confirmRemove}
-        danger
-        title="เอาสลิปออกจากการจ่ายนี้?"
-        confirmLabel="เอาสลิปออก"
-        message={`"${item.title}" ${fmt(item.amount)} บาท\n\nการจ่ายและยอดเงินไม่เปลี่ยน แค่สลิปจะไม่แสดงกับรายการนี้อีก`}
-        onConfirm={() => {
-          // ไปใบข้างเคียงก่อนเอาออก ไม่งั้นตัวดูค้างชี้การจ่ายนี้ แล้วเด้งกลับมาเองตอนแนบใหม่
-          const next = items[index + 1] ?? items[index - 1]
-          setConfirmRemove(false)
-          setFileIndex(0)
-          if (next) onChangeItem(next.key)
-          else onClose()
-          onRemove(item.row)
-        }}
-        onCancel={() => setConfirmRemove(false)}
-      />
     </>
   )
 }

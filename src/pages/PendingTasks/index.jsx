@@ -20,6 +20,8 @@ import ReceiveIncomeDatePopup from '../../components/shared/ReceiveIncomeDatePop
 import ConfirmPopup from '../../components/shared/ConfirmPopup'
 import FileUploadPopup from '../../components/shared/FileUploadPopup'
 import { AttachmentButton, getAttachments, getPrimaryAttachment } from '../../components/shared/AttachmentViewer'
+import AttachmentManagerPopup from '../../components/shared/AttachmentManagerPopup'
+import { incomeTarget, pendingTarget } from '../../lib/attachmentTargets'
 
 const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })
 const plain = (n) => Number(n ?? 0).toLocaleString('th-TH')
@@ -76,6 +78,7 @@ export default function PendingTasksPage() {
   const [payPending, setPayPending] = useState(null)   // { item, method }
   const [receive, setReceive] = useState(null)          // { item, method }
   const [taxUpload, setTaxUpload] = useState(null)
+  const [manageTarget, setManageTarget] = useState(null)
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [editingTx, setEditingTx] = useState(null)
   // มือถือ: แถวไหนกด ⋯ อยู่ (กางปุ่มรอง แก้ไข/ลบ/ไฟล์แนบ ของแถวนั้น)
@@ -262,7 +265,7 @@ export default function PendingTasksPage() {
         )}
 
         {/* หัวตาราง — ซ่อนบนจอเล็กเพราะแถวเปลี่ยนเป็นการ์ดแทน */}
-        <div className="hidden lg:grid grid-cols-[74px_minmax(0,1fr)_128px_130px_180px] gap-3 px-[18px] pb-2 text-[11px] tracking-[0.08em] uppercase text-faint border-b border-[#EFEDE7]">
+        <div className="hidden lg:grid grid-cols-[74px_minmax(0,1fr)_128px_130px_216px] gap-3 px-[18px] pb-2 text-[11px] tracking-[0.08em] uppercase text-faint border-b border-[#EFEDE7]">
           <span>ครบกำหนด</span><span>รายการ</span><span>ประเภท</span><span className="text-right">ยอด</span><span />
         </div>
 
@@ -324,7 +327,7 @@ export default function PendingTasksPage() {
                 {/* จอใหญ่เป็นตาราง 5 คอลัมน์ มือถือเป็นการ์ดสองบรรทัด (ข้อมูล / ปุ่ม)
                     lg:contents ทำให้ลูกของบรรทัดแรกกลายเป็นช่องตารางเองบนจอใหญ่ */}
                 <div
-                  className={`${overdue ? 'hidden lg:grid' : 'flex flex-col lg:grid'} lg:grid-cols-[74px_minmax(0,1fr)_128px_130px_180px] gap-2 lg:gap-3 lg:items-center py-3 border-b border-[#F2F0EA] ${
+                  className={`${overdue ? 'hidden lg:grid' : 'flex flex-col lg:grid'} lg:grid-cols-[74px_minmax(0,1fr)_128px_130px_216px] gap-2 lg:gap-3 lg:items-center py-3 border-b border-[#F2F0EA] ${
                     overdue ? 'bg-[#FEF6F5] -mx-4 px-4 sm:-mx-[18px] sm:px-[18px]' : ''
                   }`}
                 >
@@ -382,8 +385,22 @@ export default function PendingTasksPage() {
                       </button>
                     )}
                     <span className={`${moreRow === r.key ? 'flex' : 'hidden'} lg:flex gap-1.5 items-center`}>
-                      {attachments.length > 0 && (
+                      {r.kind === 'tax' && attachments.length > 0 && (
                         <AttachmentButton attachment={getPrimaryAttachment(r.data)} attachments={attachments} compact />
+                      )}
+                      {(r.kind === 'pending' || r.kind === 'income') && (
+                        <button
+                          onClick={() => setManageTarget(r.kind === 'income' ? incomeTarget(r.data) : pendingTarget(r.data))}
+                          disabled={busy}
+                          title={attachments.length > 0 ? 'ดู แนบเพิ่ม เปลี่ยน หรือลบไฟล์' : 'แนบไฟล์'}
+                          aria-label={`ไฟล์แนบของ ${r.title} ${attachments.length} ไฟล์`}
+                          className={`min-w-10 h-10 lg:min-w-8 lg:h-8 px-1.5 rounded-[11px] lg:rounded-[9px] border flex items-center justify-center gap-0.5 text-[11.5px] font-semibold disabled:opacity-50 ${
+                            attachments.length > 0 ? 'border-ink text-ink bg-white hover:bg-paper' : 'border-hairline text-faint hover:bg-paper hover:text-ink'
+                          }`}
+                        >
+                          <Icon name="attach_file" size={17} />
+                          {attachments.length > 0 && <span className="tabular-nums">{attachments.length}</span>}
+                        </button>
                       )}
                       {/* บิลค้างชำระที่ผูกกับรายการบันทึกไว้ แก้ยอด/ชื่อได้จากตรงนี้เลย
                           (ของเดิมต้องไปหาที่หน้าค้นหารายการ) */}
@@ -456,6 +473,7 @@ export default function PendingTasksPage() {
         onCancel={() => setReceive(null)}
       />
       {editingTx && <EditTransactionPopup transaction={editingTx} onClose={() => setEditingTx(null)} />}
+      {manageTarget && <AttachmentManagerPopup target={manageTarget} onClose={() => setManageTarget(null)} />}
       {taxUpload && (
         <FileUploadPopup
           title="อัปโหลดใบกำกับภาษี"

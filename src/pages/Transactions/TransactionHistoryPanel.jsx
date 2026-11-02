@@ -7,7 +7,9 @@ import usePendingStore from '../../store/usePendingStore'
 import DateRangeFilter from '../../components/shared/DateRangeFilter'
 import EditTransactionPopup from '../../components/shared/EditTransactionPopup'
 import ConfirmPopup from '../../components/shared/ConfirmPopup'
-import { AttachmentButton, getAttachments, getPrimaryAttachment } from '../../components/shared/AttachmentViewer'
+import { getAttachments, getPrimaryAttachment } from '../../components/shared/AttachmentViewer'
+import AttachmentManagerPopup from '../../components/shared/AttachmentManagerPopup'
+import { txTarget } from '../../lib/attachmentTargets'
 import { cancelTransaction, describeTxCancelEffects } from '../../lib/transactionActions'
 
 function methodLabel(m) {
@@ -23,6 +25,7 @@ function TxCard({ tx, onEdit }) {
   const { pendingPayments, taxInvoices, pendingIncomes } = usePendingStore()
   const [expanded, setExpanded] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [managingFiles, setManagingFiles] = useState(false)
 
   const isIncome = tx.type === 'income'
   const borderColor = isIncome ? 'border-l-emerald-400' : 'border-l-red-400'
@@ -55,6 +58,7 @@ function TxCard({ tx, onEdit }) {
 
   return (
     <>
+      {managingFiles && <AttachmentManagerPopup target={txTarget(tx)} onClose={() => setManagingFiles(false)} />}
       <div className={`rounded-lg border-l-4 ${borderColor} border border-gray-100 bg-white shadow-sm overflow-hidden`}>
         <div className="px-3 py-2 flex items-center gap-2">
 
@@ -81,7 +85,9 @@ function TxCard({ tx, onEdit }) {
                 </span>
               )}
               {tx.note && <span className="text-xs text-gray-400 truncate">· 📝 {tx.note}</span>}
-              {attachment && <AttachmentButton attachments={attachments} compact />}
+              <button className="btn btn-secondary text-xs py-1 px-2" onClick={() => setManagingFiles(true)}>
+                {attachments.length > 0 ? `📎 ไฟล์ ${attachments.length}` : '+ แนบไฟล์'}
+              </button>
               {hasDetails && !expanded && (
                 <button className="text-xs text-blue-500 hover:underline" onClick={() => setExpanded(true)}>รายละเอียด ▾</button>
               )}

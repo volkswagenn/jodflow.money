@@ -134,9 +134,9 @@ export function AttachmentButton({ attachment, attachments, compact = false }) {
   )
 }
 
-export default function AttachmentViewerPopup({ attachment, attachments, onClose }) {
+export default function AttachmentViewerPopup({ attachment, attachments, onClose, startIndex = 0 }) {
   const attachmentList = attachments?.length ? attachments : (attachment?.path ? [attachment] : [])
-  const [activeIndex, setActiveIndex] = useState(0)
+  const [activeIndex, setActiveIndex] = useState(startIndex)
   const activeAttachment = attachmentList[activeIndex] ?? attachmentList[0]
   const fileName = fileNameFromPath(activeAttachment?.path)
 

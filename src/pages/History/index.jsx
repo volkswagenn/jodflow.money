@@ -5,14 +5,14 @@ import useLogStore from '../../store/useLogStore'
 import useTransactionStore from '../../store/useTransactionStore'
 import useCreditCardStore from '../../store/useCreditCardStore'
 import usePaymentHistory from '../../hooks/usePaymentHistory'
-import useSlipActions from '../../hooks/useSlipActions'
 import { slipsInstalled } from '../../lib/api/paymentSlips'
 import { paymentViewerItem, fileShortLabel, whenText } from '../../lib/paymentSlipView'
+import { slipTarget, txTarget } from '../../lib/attachmentTargets'
 import { ACTIVITY_LABELS } from '../../lib/logBuilder'
 import { localDateStr } from '../../lib/dateUtils'
 import Icon from '../../components/shared/Icon'
 import DateRangeFilter from '../../components/shared/DateRangeFilter'
-import FileUploadPopup from '../../components/shared/FileUploadPopup'
+import AttachmentManagerPopup from '../../components/shared/AttachmentManagerPopup'
 import SlipImage from '../../components/shared/SlipImage'
 import SlipViewerPopup from '../../components/shared/SlipViewerPopup'
 import { getAttachments } from '../../components/shared/AttachmentViewer'
@@ -25,7 +25,9 @@ const TX_LOG_TYPES = new Set([
 ])
 
 // บันทึกพวกนี้ชี้ไปที่รายการเงินใบหนึ่ง ซึ่งอาจมีใบเสร็จแนบอยู่
-const TX_FILE_TYPES = new Set([...TX_LOG_TYPES, 'RECURRING_PAID', 'UPLOAD_RECEIPT'])
+const TX_FILE_TYPES = new Set([...TX_LOG_TYPES, 'RECURRING_PAID', 'UPLOAD_RECEIPT', 'ATTACHMENT_EDIT'])
+// บันทึกเรื่องไฟล์เอง ไม่ต้องชวนแนบซ้ำในแถวนี้ถ้าไฟล์ถูกเอาออกไปแล้ว
+const FILE_LOG_TYPES = new Set(['ATTACH_PAYMENT_SLIP', 'ATTACHMENT_EDIT', 'UPLOAD_RECEIPT'])
 
 // บันทึกกับขาการจ่ายถูกเขียนในคำสั่งเดียวกัน เวลาจึงแทบตรงกัน เผื่อไว้สำหรับบันทึกรุ่นเก่า
 // ที่เขียนแยกคำสั่ง — ถ้าไม่จำกัด จ่ายแล้วย้อนแล้วจ่ายใหม่ยอดเดิม บันทึกครั้งแรก
@@ -41,7 +43,8 @@ const LEG_MATCH_MS = 2 * 60 * 1000
 function paymentKeyOfLog(log, legs) {
   const v = log.newValue ?? {}
   switch (log.activityType) {
-    case 'ATTACH_PAYMENT_SLIP': return v.kind && v.refId ? `${v.kind}:${v.refId}` : null
+    case 'ATTACH_PAYMENT_SLIP':
+    case 'ATTACHMENT_EDIT': return v.kind && v.refId ? `${v.kind}:${v.refId}` : null
     case 'INSTALLMENT_PAY': return v.entryId ? `card_installment:${v.entryId}` : null
     case 'DEBT_PAY':
     case 'DEBT_RECEIVE': return v.entryId ? `debt:${v.entryId}` : null
@@ -67,7 +70,7 @@ function paymentKeyOfLog(log, legs) {
   }
 }
 
-/** ใบเสร็จของรายการเงิน → สิ่งที่ SlipViewerPopup แสดง (แก้ไฟล์ที่ฟอร์มรายการ ไม่ใช่ตรงนี้) */
+/** ไฟล์ของรายการเงิน → สิ่งที่ SlipViewerPopup แสดง */
 function transactionViewerItem(tx, kindLabel) {
   const files = getAttachments(tx)
   const uploadedAt = files[0]?.uploadedAt
@@ -84,7 +87,7 @@ function transactionViewerItem(tx, kindLabel) {
       ...(uploadedAt ? [['แนบเมื่อ', whenText(uploadedAt)]] : []),
     ],
     files,
-    row: null,
+    target: txTarget(tx),
   }
 }
 
@@ -137,12 +140,9 @@ function AllTab() {
   const [search, setSearch] = useState('')
   const [onlyFiles, setOnlyFiles] = useState(false)
   const [viewKey, setViewKey] = useState(null)
-  const [uploadFor, setUploadFor] = useState(null)
-  const [slipError, setSlipError] = useState('')
-  const [busy, setBusy] = useState(false)
+  const [manageTarget, setManageTarget] = useState(null)
   const legs = useCreditCardStore((s) => s.statementPayments)
   const paymentRows = usePaymentHistory()
-  const { attachPaths, dropSlip } = useSlipActions()
   const paymentByKey = useMemo(() => new Map(paymentRows.map((r) => [r.key, r])), [paymentRows])
   const txById = useMemo(() => new Map(transactions.map((t) => [t.id, t])), [transactions])
 
@@ -166,6 +166,7 @@ function AllTab() {
       description: `${tx.type === 'income' ? 'รายรับ' : 'รายจ่าย'} "${tx.itemName ?? 'ไม่ระบุ'}" ${Number(tx.amount || 0).toLocaleString()} บาท`,
       walletEffect: { delta: tx.type === 'income' ? Number(tx.amount || 0) : -Number(tx.amount || 0) },
       viewer: getAttachments(tx).length > 0 ? transactionViewerItem(tx, tx.type === 'income' ? 'รายรับ' : 'รายจ่าย') : null,
+      attachTo: getAttachments(tx).length > 0 ? null : txTarget(tx),
     }))
 
   const systemEvents = logs
@@ -186,8 +187,10 @@ function AllTab() {
         date: localDateStr(log.timestamp),
         label,
         viewer,
-        // การจ่ายที่ยังอยู่แต่ยังไม่มีสลิป แนบจากแถวนี้ได้เลย · บันทึก "แนบสลิป" ที่สลิปถูกเอาออกไปแล้วไม่ต้องชวนแนบ
-        attachTo: !viewer && payment && log.activityType !== 'ATTACH_PAYMENT_SLIP' ? payment : null,
+        // รายการที่ยังอยู่แต่ยังไม่มีไฟล์ แนบจากแถวนี้ได้เลย
+        attachTo: viewer || FILE_LOG_TYPES.has(log.activityType) ? null
+          : payment ? (slipsInstalled() ? slipTarget(payment) : null)
+          : tx ? txTarget(tx) : null,
       }
     })
 
@@ -227,29 +230,6 @@ function AllTab() {
       seenViewers.add(item.key)
       return true
     })
-
-  const attachSlip = async (row, paths) => {
-    setBusy(true); setSlipError('')
-    try {
-      await attachPaths(row, paths)
-    } catch (err) {
-      setSlipError(err.message)
-    } finally {
-      setBusy(false)
-      setUploadFor(null)
-    }
-  }
-
-  const removeSlip = async (row) => {
-    setBusy(true); setSlipError('')
-    try {
-      await dropSlip(row)
-    } catch (err) {
-      setSlipError(err.message)
-    } finally {
-      setBusy(false)
-    }
-  }
 
   // ชิปกรองด่วน — ชนิดที่คนมองหาบ่อยที่สุด ส่วนที่เหลือยังเลือกจากรายการเต็มได้
   const QUICK = [
@@ -314,8 +294,6 @@ function AllTab() {
         </div>
       </div>
 
-      {slipError && <p className="text-[12.5px] text-expense bg-expense-soft border border-[#F0C4BE] rounded-ctl px-3.5 py-2.5">{slipError}</p>}
-
       <div className="card px-[18px] pt-1.5 pb-0 flex-1 min-h-0">
       {events.length === 0 ? (
         <p className="text-center text-[13px] text-faint py-12">ไม่มีประวัติในช่วงที่เลือก</p>
@@ -370,14 +348,14 @@ function AllTab() {
                         </span>
                       </button>
                     )}
-                    {event.attachTo && slipsInstalled() && (
+                    {event.attachTo && (
                       <button
-                        onClick={() => setUploadFor(event.attachTo)}
-                        aria-label={`แนบสลิปของ ${event.attachTo.title}`}
+                        onClick={() => setManageTarget(event.attachTo)}
+                        aria-label={`แนบไฟล์ของ ${event.attachTo.title}`}
                         className="h-11 px-2.5 rounded-[10px] border border-dashed border-[#B9B5A9] bg-[#FAF9F6] text-[11.5px] font-semibold text-muted flex items-center gap-1 hover:border-ink hover:text-ink"
                       >
                         <Icon name="add" size={15} />
-                        แนบสลิป
+                        {event.attachTo.kind === 'slip' ? 'แนบสลิป' : 'แนบไฟล์'}
                       </button>
                     )}
                   </span>
@@ -400,26 +378,10 @@ function AllTab() {
           itemKey={viewKey}
           onChangeItem={setViewKey}
           onClose={() => setViewKey(null)}
-          onReplace={(row) => setUploadFor(row)}
-          onRemove={removeSlip}
-          busy={busy}
+          onManage={(item) => setManageTarget(item.target)}
         />
       )}
-      {uploadFor && (
-        <FileUploadPopup
-          title="แนบสลิปการจ่าย"
-          description={`${uploadFor.title} · ${Number(uploadFor.amount ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })} บาท`}
-          createdAt={uploadFor.paidAt}
-          filenamePrefix="slip"
-          folderBase="slips"
-          onConfirm={(saved) => {
-            const paths = saved ? (Array.isArray(saved) ? saved : [saved]) : []
-            if (paths.length === 0) return setUploadFor(null)
-            attachSlip(uploadFor, paths)
-          }}
-          onCancel={() => setUploadFor(null)}
-        />
-      )}
+      {manageTarget && <AttachmentManagerPopup target={manageTarget} onClose={() => setManageTarget(null)} />}
     </div>
   )
 }

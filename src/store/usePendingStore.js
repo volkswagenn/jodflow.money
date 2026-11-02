@@ -189,6 +189,12 @@ const usePendingStore = create((set, get) => ({
     return item
   },
 
+  updatePendingIncomeById: async (id, changes) => {
+    const item = await pendingApi.updatePendingIncome(id, changes)
+    set((s) => ({ pendingIncomes: s.pendingIncomes.map((p) => (p.id === id ? { ...p, ...item } : p)) }))
+    return item
+  },
+
   syncPendingByTxId: async (transactionId, changes) => {
     const targets = get().pendingPayments.filter((p) => p.transactionId === transactionId)
     for (const p of targets) await get().updatePendingById(p.id, changes)
